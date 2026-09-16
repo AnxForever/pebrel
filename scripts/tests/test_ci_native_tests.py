@@ -38,8 +38,10 @@ class NativeSuiteTests(unittest.TestCase):
                         workflow.index("Test complete workspace"))
         preview = (root / ".github/workflows/preview-packages.yml").read_text()
         windows = preview.split("\n  windows:\n", 1)[1].split("\n  aggregate:", 1)[0]
+        self.assertNotIn("prepare-windows-runtime.ps1", preview.split("\njobs:", 1)[1].split("\n  windows:", 1)[0])
         self.assertLess(windows.index("prepare-windows-runtime.ps1"),
                         windows.index("cargo test --locked --workspace"))
+        self.assertIn("python scripts/conformance/windows_standard_user.py scripts/conformance/run.py", windows)
 
     def test_full_workspace_and_interactions_share_one_unfiltered_invocation(self):
         rust = [command for command in native_commands() if command[:2] == ["cargo", "test"]]
