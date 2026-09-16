@@ -698,7 +698,7 @@ pub fn run(args: Vec<String>) -> i32 {
         },
         SshPlan::Inject => {
             let b64 = base64::engine::general_purpose::STANDARD;
-            let shell = nebula_terminal::tty::CONNECTION_SHELL;
+            let shell = nebula_terminal::tty::connection_shell();
             let bootstrap = build_bootstrap(
                 &b64.encode(format!("{REMOTE_BASH}\n{shell}")),
                 &b64.encode(format!("{REMOTE_ZSH}\n{shell}")),
