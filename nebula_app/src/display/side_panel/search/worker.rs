@@ -391,7 +391,10 @@ mod tests {
         std::fs::write(nested.join("needle.txt"), b"").unwrap();
         let deadline = Instant::now() + Duration::from_secs(15);
         while index.state.work_deferrals.load(Ordering::Acquire) == deferrals {
-            assert!(Instant::now() < deadline, "watch invalidation did not reach the held work lock");
+            assert!(
+                Instant::now() < deadline,
+                "watch invalidation did not reach the held work lock"
+            );
             std::thread::sleep(Duration::from_millis(10));
         }
         assert_eq!(index.scans(), scans, "the contending worker cannot scan under the held lock");
