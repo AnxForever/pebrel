@@ -651,28 +651,6 @@ impl SettingsPane {
                     .masked(true)
                     .placeholder(localized_input_placeholder("backup_secret", language))
             }),
-            keymap_search_input: {
-                let input = cx.new(|cx| {
-                    InputState::new(window, cx)
-                        .placeholder(localized_input_placeholder("keymap_search", language))
-                });
-                subscriptions.push(cx.subscribe_in(
-                    &input,
-                    window,
-                    |_this: &mut Self,
-                     _: &Entity<InputState>,
-                     event: &InputEvent,
-                     _: &mut Window,
-                     cx: &mut Context<Self>| {
-                        // 搜索词变化只影响可见行集合；捕获态不因打字被打断
-                        // （捕获期间焦点在分区根上，输入框收不到键）。
-                        if matches!(event, InputEvent::Change) {
-                            cx.notify();
-                        }
-                    },
-                ));
-                input
-            },
             keymap_capture: None,
             keymap_capture_preview: String::new(),
             keymap_binds: nebula_settings::keybind_pairs(),
