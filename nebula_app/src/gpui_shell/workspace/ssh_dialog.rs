@@ -119,8 +119,7 @@ mod tests {
     fn ssh_dialog_cancel_does_not_accept_an_unknown_host(cx: &mut TestAppContext) {
         cx.update(|cx| {
             gpui_component::init(cx);
-            // Test the buttons at their settled hit targets; opening animation
-            // otherwise moves them between the simulated mouse down and up.
+            // Keep the button hit target fixed during simulated mouse down/up.
             cx.set_reduce_motion(true);
         });
         let (_, cx) = cx.add_window_view(|window, cx| {
@@ -149,6 +148,7 @@ mod tests {
     fn ssh_dialog_password_is_delivered_only_on_confirmation(cx: &mut TestAppContext) {
         cx.update(|cx| {
             gpui_component::init(cx);
+            // Keep the button hit target fixed during simulated mouse down/up.
             cx.set_reduce_motion(true);
         });
         let (_, cx) = cx.add_window_view(|window, cx| {
