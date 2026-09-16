@@ -77,10 +77,10 @@ impl NebulaWorkspace {
             CommandPlatform::Posix
         };
         let mut commands = self.saved_commands.commands().to_vec();
-        commands.extend(crate::saved_commands::builtins::commands(
-            crate::gpui_shell::config::ui_language(cx),
-            platform,
-        ));
+        commands.extend(
+            self.saved_commands
+                .builtin_commands(crate::gpui_shell::config::ui_language(cx), platform),
+        );
         self.sort_command_groups(&mut commands, cx);
         commands
     }
@@ -411,7 +411,7 @@ impl NebulaWorkspace {
         cx: &mut Context<'_, Self>,
     ) {
         let Some(command) =
-            self.saved_commands.commands().iter().find(|command| command.id == id).cloned()
+            self.available_saved_commands(cx).into_iter().find(|command| command.id == id)
         else {
             return;
         };
@@ -442,12 +442,14 @@ impl NebulaWorkspace {
                 .child(
                     DialogClose::new().child(
                         Button::new("saved-command-delete-cancel")
+                            .debug_selector(|| "saved-command-delete-cancel".into())
                             .label(language.pick("取消", "Cancel")),
                     ),
                 )
                 .child(
                     DialogAction::new().child(
                         Button::new("saved-command-delete-confirm")
+                            .debug_selector(|| "saved-command-delete-confirm".into())
                             .label(language.pick("删除", "Delete"))
                             .danger(),
                     ),
@@ -736,27 +738,26 @@ impl NebulaWorkspace {
                                         },
                                     )),
                                 )
-                                .when(!builtin, |actions| {
-                                    actions.child(
-                                        Button::new(SharedString::from(format!(
-                                            "saved-command-delete-{index}"
-                                        )))
-                                        .icon(custom_icon(crate::gpui_shell::assets::nav::TRASH))
-                                        .ghost()
-                                        .xsmall()
-                                        .tooltip(language.pick("删除命令", "Delete command"))
-                                        .on_click(
-                                            cx.listener(move |this, _, window, cx| {
-                                                cx.stop_propagation();
-                                                this.open_delete_saved_command_dialog(
-                                                    delete_id.clone(),
-                                                    window,
-                                                    cx,
-                                                );
-                                            }),
-                                        ),
-                                    )
-                                }),
+                                .child(
+                                    Button::new(SharedString::from(format!(
+                                        "saved-command-delete-{index}"
+                                    )))
+                                    .icon(custom_icon(crate::gpui_shell::assets::nav::TRASH))
+                                    .debug_selector(move || format!("saved-command-delete-{index}"))
+                                    .ghost()
+                                    .xsmall()
+                                    .tooltip(language.pick("删除命令", "Delete command"))
+                                    .on_click(cx.listener(
+                                        move |this, _, window, cx| {
+                                            cx.stop_propagation();
+                                            this.open_delete_saved_command_dialog(
+                                                delete_id.clone(),
+                                                window,
+                                                cx,
+                                            );
+                                        },
+                                    )),
+                                ),
                         )
                         .into_any_element(),
                 );

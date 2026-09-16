@@ -97,7 +97,7 @@ impl SavedCommands {
 
     fn has_command(&self, id: &str) -> bool {
         // Builtin ids persist across the platform-specific views of the same store.
-        (id.starts_with("builtin:") && id.len() > 8 && id.len() <= MAX_ID_CHARS)
+        (is_builtin_id(id) && !self.deleted_builtins.contains(id))
             || self.commands.iter().any(|command| command.id == id)
     }
 

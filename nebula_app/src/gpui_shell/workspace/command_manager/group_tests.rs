@@ -9,17 +9,14 @@ fn draw(cx: &mut VisualTestContext) {
     });
 }
 
-#[gpui::test]
-fn grouping_drag_and_context_menu_keep_commands_and_keyboard_order(cx: &mut TestAppContext) {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("saved_commands.json");
-    let mut saved = crate::saved_commands::SavedCommands::load_from(&path).unwrap();
-    let command = saved.insert("Build", "cargo build", false).unwrap();
-    saved.create_group("Work").unwrap();
-    let group = saved.groups()[0].id.clone();
+fn open_manager(
+    saved: crate::saved_commands::SavedCommands,
+    cx: &mut TestAppContext,
+) -> (Entity<NebulaWorkspace>, VisualTestContext) {
     let hub = crate::runtime_api::RuntimeHub::new();
     cx.update(|cx| {
         gpui_component::init(cx);
+        cx.set_reduce_motion(true);
         crate::gpui_shell::math_view::register(cx);
         crate::gpui_shell::file_editor::init(cx);
         super::super::init(cx);
@@ -50,6 +47,18 @@ fn grouping_drag_and_context_menu_keep_commands_and_keyboard_order(cx: &mut Test
     let mut cx = window.clone();
     cx.simulate_resize(gpui::size(px(1200.0), px(900.0)));
     draw(&mut cx);
+    (workspace, cx)
+}
+
+#[gpui::test]
+fn grouping_drag_and_context_menu_keep_commands_and_keyboard_order(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("saved_commands.json");
+    let mut saved = crate::saved_commands::SavedCommands::load_from(&path).unwrap();
+    let command = saved.insert("Build", "cargo build", false).unwrap();
+    saved.create_group("Work").unwrap();
+    let group = saved.groups()[0].id.clone();
+    let (workspace, mut cx) = open_manager(saved, cx);
     let row = cx.debug_bounds("saved-command-row-0").unwrap();
     let target =
         cx.debug_bounds(Box::leak(format!("command-group-{group}").into_boxed_str())).unwrap();
@@ -90,4 +99,50 @@ fn grouping_drag_and_context_menu_keep_commands_and_keyboard_order(cx: &mut Test
     });
     cx.simulate_keystrokes("down");
     workspace.read_with(&cx, |this, _| assert_eq!(this.command_manager_selected, 1));
+}
+
+#[gpui::test]
+fn builtin_delete_can_be_cancelled_and_stays_deleted_after_reopening(cx: &mut TestAppContext) {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("saved_commands.json");
+    let saved = crate::saved_commands::SavedCommands::load_from(&path).unwrap();
+    let (workspace, mut cx) = open_manager(saved, cx);
+    let deleted_id =
+        workspace.read_with(&cx, |this, cx| this.filtered_saved_commands(cx)[0].id.clone());
+    assert!(deleted_id.starts_with("builtin:"));
+    for confirm in [false, true] {
+        let button = cx.debug_bounds("saved-command-delete-0").expect("builtin delete button");
+        cx.simulate_click(button.center(), Modifiers::default());
+        draw(&mut cx);
+        let action =
+            if confirm { "saved-command-delete-confirm" } else { "saved-command-delete-cancel" };
+        let button = cx.debug_bounds(action).expect("delete dialog action");
+        cx.simulate_click(button.center(), Modifiers::default());
+        draw(&mut cx);
+        workspace.read_with(&cx, |this, cx| {
+            assert!(this.command_manager_open && this.tabs.is_empty());
+            assert_eq!(
+                this.filtered_saved_commands(cx).iter().any(|row| row.id == deleted_id),
+                !confirm
+            );
+        });
+    }
+    workspace.update_in(&mut cx, |this, window, cx| {
+        this.toggle_command_manager(window, cx);
+        this.toggle_command_manager(window, cx);
+    });
+    draw(&mut cx);
+    workspace.read_with(&cx, |this, cx| {
+        assert!(this.filtered_saved_commands(cx).iter().all(|row| row.id != deleted_id));
+    });
+    let saved = crate::saved_commands::SavedCommands::load_from(&path).unwrap();
+    assert!(
+        saved
+            .builtin_commands(
+                crate::i18n::UiLanguage::EnUs,
+                crate::saved_commands::builtins::CommandPlatform::Windows
+            )
+            .iter()
+            .all(|row| row.id != deleted_id)
+    );
 }

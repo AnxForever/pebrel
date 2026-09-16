@@ -733,6 +733,10 @@ settings files.
   display text. Absent builtin membership means the builtin group; explicit null
   means ungrouped. Old stores load unchanged. Older applications can read command
   content but do not preserve this additional metadata when rewriting the store.
+  The user also requested deletable builtins: an optional `deleted_builtins` set
+  records stable IDs in the same store. Template content stays in the catalog;
+  changing language, platform or grouping cannot bring a deleted entry back.
+  Older applications also discard this set on rewrite.
 - **Ownership:** `saved_commands` remains the sole validation and persistence
   authority. Every mutation locks, reloads, validates and atomically writes both
   commands and organization. No extra file, dependency, worker or service is added.
@@ -742,6 +746,8 @@ settings files.
   group file would need a transaction spanning two files.
 - **Consequences:** Deleting a group leaves its commands ungrouped; deleting a
   command removes its membership. Stale drag targets fail without changing disk.
+  Deleted builtin IDs remain valid after catalog reduction, but cannot be assigned
+  to a group. Concurrent mutations preserve deletions through the same transaction.
   Search and keyboard selection use the same displayed command order; headings
   never execute commands. Group names and counts use bounded validation.
 - **Validation:** Regression coverage includes old stores, explicit builtin
