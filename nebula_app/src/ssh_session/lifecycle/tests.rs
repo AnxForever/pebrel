@@ -424,7 +424,7 @@ impl Fixture {
     }
 
     async fn connect(&self) -> AcquiredSession {
-        authenticated_route(&self.route, None::<&NoopSshEventHost>, false).await.unwrap()
+        authenticated_route(&self.route, None::<&NoopSshEventHost>, false, true).await.unwrap()
     }
 
     async fn forget(&self, session: &SharedSession) {

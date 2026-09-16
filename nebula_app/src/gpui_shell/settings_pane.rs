@@ -49,6 +49,7 @@ mod providers;
 mod reset;
 mod scrolling;
 mod search_header;
+mod segmented;
 mod setting_help;
 mod theme_picker;
 
@@ -181,6 +182,7 @@ pub struct SettingsPane {
     pub(super) ssh_editor_focus_handle: FocusHandle,
     pub(super) ssh_editor_seq: u64,
     pub(super) ssh_test_seq: u64,
+    pub(super) ssh_test_task: Option<gpui::Task<()>>,
     pub(super) ssh_status: Option<SshStatus>,
     pub(super) ssh_show_hidden: bool,
     /// 删除确认（二次点击生效，旧壳确认对话框的轻量对应）。
@@ -218,7 +220,6 @@ pub struct SettingsPane {
     /// 按键映射编辑器（旧壳 spec 002 的 GPUI 形态）：搜索输入 + 捕获态 +
     /// `keybind=` 行的工作镜像。模型层（combo 解析/展示/冲突/默认表）复用
     /// `display::keymap`，两壳同一套存储与语义。
-    keymap_search_input: Entity<InputState>,
     keymap_capture: Option<usize>,
     keymap_capture_preview: String,
     keymap_binds: Vec<(String, String)>,
@@ -313,7 +314,6 @@ impl SettingsPane {
             (&self.font_family_input, "font_family"),
             (&self.backup_pass_input, "backup_password"),
             (&self.backup_secret_input, "backup_secret"),
-            (&self.keymap_search_input, "keymap_search"),
         ] {
             let placeholder = localized_input_placeholder(key, language);
             input.update(cx, |state, cx| state.set_placeholder(placeholder, window, cx));
@@ -671,11 +671,14 @@ impl SettingsPane {
         // 闭态选中值 = accent（旧壳 combobox_value 15 处调用 14 处传
         // sk.accent）。闭框/背景都不带文字色，包一层就能继承下去；右侧
         // chevron 在组件内自带 muted，不会被染色。
-        let control = div()
-            .debug_selector(move || format!("settings-select-{key}"))
-            .w(px(SETTINGS_SELECT_WIDTH))
-            .text_color(cx.theme().link)
-            .children(select.map(|state| Select::new(&state)));
+        let control = self.segmented_setting(key, cx).unwrap_or_else(|| {
+            div()
+                .debug_selector(move || format!("settings-select-{key}"))
+                .w(px(SETTINGS_SELECT_WIDTH))
+                .text_color(cx.theme().link)
+                .children(select.map(|state| Select::new(&state)))
+                .into_any_element()
+        });
         self.maybe_marked(key, label, desc, control, cx)
     }
 

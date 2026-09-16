@@ -142,7 +142,6 @@ pub(super) fn localized_input_placeholder(
             language.pick("备份密码（至少 8 位）", "Backup password (at least 8 characters)")
         },
         "backup_secret" => language.tr("settings.input.backup_secret"),
-        "keymap_search" => language.pick("搜索动作或按键…", "Search actions or keys..."),
         _ => "",
     }
 }

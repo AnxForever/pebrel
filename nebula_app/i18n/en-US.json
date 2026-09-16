@@ -363,7 +363,23 @@
     "preview_limited": "The rich preview is shortened for this large document. Switch to Edit to read the loaded source."
   },
   "commands": {
+    "add_group": "New group",
+    "group_name": "Group name",
+    "builtin_group": "Built-in commands",
+    "ungrouped": "Ungrouped",
+    "remove_from_group": "Remove from group",
+    "move_to_group": "Move to group",
+    "delete_group": "Delete group; keep commands ungrouped",
+    "group_save_failed": "Could not save command groups",
     "builtin": {
+      "python_install_windows": "Install Python 3.14 · Windows",
+      "python_install_mac": "Install Python · macOS",
+      "python_install_ubuntu": "Install Python · Ubuntu/Debian",
+      "python_install_fedora": "Install Python · Fedora",
+      "git_install_windows": "Install Git · Windows",
+      "git_install_mac": "Install Git · macOS",
+      "git_install_ubuntu": "Install Git · Ubuntu/Debian",
+      "git_install_fedora": "Install Git · Fedora",
       "docker_install_windows": "Install Docker Desktop · Windows",
       "docker_install_mac": "Install Docker Desktop · macOS",
       "docker_install_ubuntu": "Install Docker · Ubuntu 24.04",

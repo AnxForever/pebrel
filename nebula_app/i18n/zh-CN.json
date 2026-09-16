@@ -363,7 +363,23 @@
     "preview_limited": "此文档较大，富文本预览已缩短。切换到编辑可查看已加载的源码。"
   },
   "commands": {
+    "add_group": "新建分组",
+    "group_name": "分组名称",
+    "builtin_group": "内置命令",
+    "ungrouped": "未分组",
+    "remove_from_group": "移出分组",
+    "move_to_group": "移到分组",
+    "delete_group": "删除分组，保留其中的命令",
+    "group_save_failed": "无法保存命令分组",
     "builtin": {
+      "python_install_windows": "安装 Python 3.14 · Windows",
+      "python_install_mac": "安装 Python · macOS",
+      "python_install_ubuntu": "安装 Python · Ubuntu/Debian",
+      "python_install_fedora": "安装 Python · Fedora",
+      "git_install_windows": "安装 Git · Windows",
+      "git_install_mac": "安装 Git · macOS",
+      "git_install_ubuntu": "安装 Git · Ubuntu/Debian",
+      "git_install_fedora": "安装 Git · Fedora",
       "docker_install_windows": "安装 Docker Desktop · Windows",
       "docker_install_mac": "安装 Docker Desktop · macOS",
       "docker_install_ubuntu": "安装 Docker · Ubuntu 24.04",
