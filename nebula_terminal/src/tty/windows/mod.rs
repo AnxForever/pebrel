@@ -957,11 +957,18 @@ __nebula_precmd() {
     printf '\033]2;NEBULA|%s|%s\007' "$cwd" "$branch"
 
     if [[ -z ${__nebula_user_ps1-} ]]; then
+        # Readline counts bytes in non-multibyte locales (including Git Bash's
+        # unset-locale default). A three-byte arrow would leave two input cells
+        # behind when redrawing a wrapped line. Keep the user's locale intact.
+        local prompt_mark='❯'
+        if (( ${#prompt_mark} != 1 )); then
+            prompt_mark='>'
+        fi
         if __nebula_bool_on "$(__nebula_setting powerline 1)"; then
             # ANSI-16 only: 35=Magenta 提示符（同 PowerShell 侧），主题表决定实际色值。
-            PS1='\[\033[35m\]❯ \[\033[0m\]'
+            PS1='\[\033[35m\]'"$prompt_mark"' \[\033[0m\]'
         else
-            PS1='\[\033[90m\]\w \[\033[35m\]❯ \[\033[0m\]'
+            PS1='\[\033[90m\]\w \[\033[35m\]'"$prompt_mark"' \[\033[0m\]'
         fi
     fi
 
@@ -1136,6 +1143,7 @@ pub fn win32_string<S: AsRef<OsStr> + ?Sized>(value: &S) -> Vec<u16> {
 
 #[cfg(test)]
 mod test {
+    mod bash_input;
     use std::io::Write;
     use std::process::{Command, Stdio};
 
@@ -1521,6 +1529,7 @@ exit 0
         run_bash_integration_case(
             r#"
 PATH=/usr/bin:/mingw64/bin:$PATH
+export LC_ALL=C.UTF-8
 NEBULA_BASHRC_SOURCED=1
 HOME=/__nebula_test_missing_home__
 APPDATA=
