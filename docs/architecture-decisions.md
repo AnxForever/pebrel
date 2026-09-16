@@ -655,35 +655,6 @@ settings files.
   large-history output or resize latency becomes unacceptable; preserve the same
   history, ordering and input contracts when evaluating alternatives.
 
-## ADR-0018 — Saved command organization
-
-- **Status:** User-requested working-tree implementation, 2026-09-16; pending
-  repository review by `@Kuddev`. No release claim.
-- **Context:** Users need named command groups, builtin defaults, drag assignment
-  and removal without duplicating immutable builtin command templates.
-- **Decision:** Add optional organization metadata to the existing version 1
-  command store. Stable group IDs and command IDs own membership; names remain
-  display text. Absent builtin membership means the builtin group; explicit null
-  means ungrouped. Old stores load unchanged. Older applications can read command
-  content but do not preserve this additional metadata when rewriting the store.
-- **Ownership:** `saved_commands` remains the sole validation and persistence
-  authority. Every mutation locks, reloads, validates and atomically writes both
-  commands and organization. No extra file, dependency, worker or service is added.
-  The UI sorts and renders a snapshot; it never writes JSON itself.
-- **Alternatives:** Per-command group fields would require materializing builtin
-  templates and could freeze their platform/localization behavior. A separate
-  group file would need a transaction spanning two files.
-- **Consequences:** Deleting a group leaves its commands ungrouped; deleting a
-  command removes its membership. Stale drag targets fail without changing disk.
-  Search and keyboard selection use the same displayed command order; headings
-  never execute commands. Group names and counts use bounded validation.
-- **Validation:** Regression coverage includes old stores, explicit builtin
-  removal, restart persistence, stale targets and serialized multiwindow writes.
-  Actual GPUI drag, menu and keyboard checks are reported separately from model
-  tests; a successful compile is not visual acceptance.
-- **Revisit condition:** Reconsider schema versioning if preserving organization
-  through edits by older application versions becomes a supported requirement.
-
 ## ADR-0018 — Durable recovery targets and update handoff
 
 - **Status:** Implementation authorized by the maintainer on 2026-09-15; native
@@ -750,3 +721,32 @@ settings files.
 - **Validation:** A bilingual release without Contributors passes. Empty,
   duplicated, unlinked or misplaced contributor sections fail; language and
   asset checksum contracts remain required.
+
+## ADR-0020 — Saved command organization
+
+- **Status:** User-requested working-tree implementation, 2026-09-16; pending
+  repository review by `@Kuddev`. No release claim.
+- **Context:** Users need named command groups, builtin defaults, drag assignment
+  and removal without duplicating immutable builtin command templates.
+- **Decision:** Add optional organization metadata to the existing version 1
+  command store. Stable group IDs and command IDs own membership; names remain
+  display text. Absent builtin membership means the builtin group; explicit null
+  means ungrouped. Old stores load unchanged. Older applications can read command
+  content but do not preserve this additional metadata when rewriting the store.
+- **Ownership:** `saved_commands` remains the sole validation and persistence
+  authority. Every mutation locks, reloads, validates and atomically writes both
+  commands and organization. No extra file, dependency, worker or service is added.
+  The UI sorts and renders a snapshot; it never writes JSON itself.
+- **Alternatives:** Per-command group fields would require materializing builtin
+  templates and could freeze their platform/localization behavior. A separate
+  group file would need a transaction spanning two files.
+- **Consequences:** Deleting a group leaves its commands ungrouped; deleting a
+  command removes its membership. Stale drag targets fail without changing disk.
+  Search and keyboard selection use the same displayed command order; headings
+  never execute commands. Group names and counts use bounded validation.
+- **Validation:** Regression coverage includes old stores, explicit builtin
+  removal, restart persistence, stale targets and serialized multiwindow writes.
+  Actual GPUI drag, menu and keyboard checks are reported separately from model
+  tests; a successful compile is not visual acceptance.
+- **Revisit condition:** Reconsider schema versioning if preserving organization
+  through edits by older application versions becomes a supported requirement.
