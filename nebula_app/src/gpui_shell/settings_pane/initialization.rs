@@ -615,6 +615,7 @@ impl SettingsPane {
             ssh_editor_focus_handle: cx.focus_handle(),
             ssh_editor_seq: 0,
             ssh_test_seq: 0,
+            ssh_test_task: None,
             ssh_status: None,
             ssh_show_hidden: false,
             ssh_delete_confirm: None,

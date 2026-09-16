@@ -181,6 +181,7 @@ pub struct SettingsPane {
     pub(super) ssh_editor_focus_handle: FocusHandle,
     pub(super) ssh_editor_seq: u64,
     pub(super) ssh_test_seq: u64,
+    pub(super) ssh_test_task: Option<gpui::Task<()>>,
     pub(super) ssh_status: Option<SshStatus>,
     pub(super) ssh_show_hidden: bool,
     /// 删除确认（二次点击生效，旧壳确认对话框的轻量对应）。
