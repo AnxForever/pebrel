@@ -5,11 +5,6 @@ use std::sync::{Arc, Mutex, OnceLock};
 use image::{ImageEncoder as _, RgbaImage};
 use nebula_settings::AppIconName;
 
-#[cfg(windows)]
-mod taskbar;
-#[cfg(windows)]
-pub(crate) use taskbar::refresh_pinned;
-
 pub const FRAME_SIZES: [u32; 14] = [16, 20, 24, 28, 32, 40, 48, 56, 64, 80, 96, 112, 128, 256];
 const ATLAS_WIDTH: u32 = 512;
 const COVERAGE_PNG: &[u8] = include_bytes!("../../extra/logo/nebula-coverage.png");
@@ -124,6 +119,9 @@ pub fn preview(variant: AppIconName, requested: u32) -> Option<Arc<gpui::Image>>
 
 #[cfg(windows)]
 pub mod windows {
+    pub(super) mod taskbar;
+    pub(crate) use taskbar::refresh_pinned;
+
     use std::cell::RefCell;
     use std::collections::HashMap;
 
@@ -148,7 +146,7 @@ pub mod windows {
     }
 
     pub fn set_window(hwnd: HWND, variant: AppIconName) {
-        super::taskbar::set_window(hwnd, variant);
+        taskbar::set_window(hwnd, variant);
         let dpi = unsafe { GetDpiForWindow(hwnd) }.max(96);
         ICONS.with(|cache| {
             let mut cache = cache.borrow_mut();
@@ -291,7 +289,8 @@ mod tests {
         for iteration in 0..10 {
             for (variant_index, variant) in AppIconName::ALL.into_iter().enumerate() {
                 windows::set_window(hwnd, variant);
-                let resource = taskbar::icon_location(hwnd).expect("taskbar shell property");
+                let resource =
+                    windows::taskbar::icon_location(hwnd).expect("taskbar shell property");
                 assert!(resource.contains(variant.settings_value()));
                 assert!(resource.ends_with(".ico,0"));
                 let handles = [ICON_SMALL, ICON_BIG]

@@ -24,10 +24,10 @@ const RELAUNCH_NAME: PROPERTYKEY = PROPERTYKEY { fmtid: APP_USER_MODEL, pid: 4 }
 const APP_ID: PROPERTYKEY = PROPERTYKEY { fmtid: APP_USER_MODEL, pid: 5 };
 
 fn ico(variant: AppIconName) -> std::io::Result<Vec<u8>> {
-    let frames = super::FRAME_SIZES
+    let frames = crate::app_icon::FRAME_SIZES
         .into_iter()
         .map(|size| {
-            super::png(variant, size)
+            crate::app_icon::png(variant, size)
                 .map(|png| (size, png))
                 .ok_or_else(|| std::io::Error::other("Could not render application icon"))
         })
@@ -130,18 +130,18 @@ mod tests {
         assert_eq!(first, materialize(directory.path(), AppIconName::Titanium).unwrap());
         assert_ne!(first, materialize(directory.path(), AppIconName::GraphiteViolet).unwrap());
         let bytes = std::fs::read(first).unwrap();
-        for size in super::super::FRAME_SIZES {
-            let png = super::super::tests::ico_png(&bytes, size);
+        for size in crate::app_icon::FRAME_SIZES {
+            let png = crate::app_icon::tests::ico_png(&bytes, size);
             assert_eq!(
                 image::load_from_memory(png).unwrap().to_rgba8(),
-                super::super::rgba(AppIconName::Titanium, size).unwrap()
+                crate::app_icon::rgba(AppIconName::Titanium, size).unwrap()
             );
         }
     }
 }
 
 #[cfg(test)]
-pub(super) fn icon_location(
+pub(in crate::app_icon) fn icon_location(
     hwnd: windows_sys::Win32::Foundation::HWND,
 ) -> windows::core::Result<String> {
     let store: IPropertyStore = unsafe { SHGetPropertyStoreForWindow(HWND(hwnd))? };
