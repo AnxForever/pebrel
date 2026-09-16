@@ -15,6 +15,7 @@ const WINDOW_TITLE_BAR_HEIGHT: f32 = 34.0;
 const PANEL_FOOTER_HEIGHT: f32 = 44.0;
 const ROW_HEIGHT: f32 = 62.0;
 const EDITOR_DIALOG_HEIGHT: f32 = 430.0;
+const COMMAND_INPUT_HEIGHT: f32 = 150.0;
 const DELETE_DIALOG_HEIGHT: f32 = 230.0;
 const MAX_SEARCH_BYTES: usize = 2 * 1024;
 const COMMAND_MANAGER_KEY_CONTEXT: &str = "NebulaSavedCommands";
@@ -29,6 +30,13 @@ fn custom_icon(path: &'static str) -> Icon {
 
 fn command_run_icon(builtin: bool, append_enter: bool) -> IconName {
     if builtin || append_enter { IconName::Play } else { IconName::SquareTerminal }
+}
+
+fn command_editor_input(state: &Entity<InputState>, cx: &App) -> Input {
+    Input::new(state)
+        .w_full()
+        .h(px(COMMAND_INPUT_HEIGHT))
+        .font_family(cx.theme().mono_font_family.clone())
 }
 
 /// 多行文本直接逐行送进 PTY 时，前台程序可能把第二行当成自己的 stdin。
@@ -294,13 +302,7 @@ impl NebulaWorkspace {
                         .child(
                             div().text_sm().font_semibold().child(language.pick("命令", "Command")),
                         )
-                        .child(
-                            div().w_full().h(px(150.0)).child(
-                                Input::new(&command)
-                                    .w_full()
-                                    .font_family(cx.theme().mono_font_family.clone()),
-                            ),
-                        ),
+                        .child(command_editor_input(&command, cx)),
                 )
                 .child(
                     gpui_component::checkbox::Checkbox::new("saved-command-append-enter")
@@ -847,3 +849,6 @@ mod tests {
         assert!(matches!(command_run_icon(false, false), IconName::SquareTerminal));
     }
 }
+
+#[cfg(all(test, feature = "gpui-test-support"))]
+mod input_tests;
