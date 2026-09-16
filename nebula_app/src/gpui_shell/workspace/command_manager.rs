@@ -4,11 +4,15 @@
 //! 弹窗覆盖在终端之上而不参与主布局，避免为了短时管理命令永久压缩 PTY。
 
 use super::*;
+mod groups;
+use groups::CommandDrag;
+pub(super) use groups::GroupMenu;
 
 const PANEL_MAX_WIDTH: f32 = 430.0;
 const PANEL_MAX_HEIGHT: f32 = 360.0;
 const PANEL_EMPTY_HEIGHT: f32 = 196.0;
-const PANEL_FIXED_HEIGHT: f32 = 108.0;
+const PANEL_FIXED_HEIGHT: f32 = 152.0;
+const GROUP_HEADER_HEIGHT: f32 = 32.0;
 const PANEL_MARGIN: f32 = 8.0;
 // 覆盖层从自绘标题栏下沿开始；固定组件依赖当前将该区域定义为 34px。
 const WINDOW_TITLE_BAR_HEIGHT: f32 = 34.0;
@@ -77,6 +81,7 @@ impl NebulaWorkspace {
             crate::gpui_shell::config::ui_language(cx),
             platform,
         ));
+        self.sort_command_groups(&mut commands, cx);
         commands
     }
 
@@ -101,7 +106,9 @@ impl NebulaWorkspace {
             })
             .collect::<Vec<_>>();
         matches.sort_by(|(a, ai, _), (b, bi, _)| b.cmp(a).then(ai.cmp(bi)));
-        matches.into_iter().map(|(_, _, command)| command).collect()
+        let mut commands = matches.into_iter().map(|(_, _, command)| command).collect::<Vec<_>>();
+        self.sort_command_groups(&mut commands, cx);
+        commands
     }
 
     pub(super) fn toggle_command_manager(
@@ -137,6 +144,7 @@ impl NebulaWorkspace {
             return;
         }
         self.command_manager_open = false;
+        self.command_group_menu = None;
         self.focus_active(window, cx);
         cx.notify();
     }
@@ -157,13 +165,14 @@ impl NebulaWorkspace {
         if !self.command_manager_open {
             return;
         }
-        let len = self.filtered_saved_commands(cx).len();
+        let commands = self.filtered_saved_commands(cx);
+        let len = commands.len();
         self.command_manager_selected = if len == 0 {
             0
         } else {
             (self.command_manager_selected as isize + delta).rem_euclid(len as isize) as usize
         };
-        self.command_manager_scroll.scroll_to_item(self.command_manager_selected);
+        self.command_manager_scroll.scroll_to_item(self.command_scroll_index(&commands, cx));
         cx.notify();
     }
 
@@ -520,190 +529,238 @@ impl NebulaWorkspace {
             self.command_manager_selected = commands.len().saturating_sub(1);
         }
         let selected_index = self.command_manager_selected;
+        let groups = self.visible_command_groups(&commands, cx);
+        let header_height = groups.len() as f32 * GROUP_HEADER_HEIGHT;
         // 固定区域只保留搜索和新增入口；命令增多时仅滚动中间列表，避免退化成大面板。
         let desired_height = if commands.is_empty() {
             PANEL_EMPTY_HEIGHT
         } else {
-            PANEL_FIXED_HEIGHT + commands.len() as f32 * ROW_HEIGHT
+            PANEL_FIXED_HEIGHT + header_height + commands.len() as f32 * ROW_HEIGHT
         };
         let panel_height = desired_height.min(PANEL_MAX_HEIGHT).min(available_height);
-        let list_scrollable =
-            commands.len() as f32 * ROW_HEIGHT > (panel_height - PANEL_FIXED_HEIGHT).max(0.0);
+        let list_scrollable = header_height + commands.len() as f32 * ROW_HEIGHT
+            > (panel_height - PANEL_FIXED_HEIGHT).max(0.0);
 
         let mut rows = Vec::with_capacity(commands.len());
-        for (index, command) in commands.into_iter().enumerate() {
-            let selected = index == selected_index;
-            let builtin = command.id.starts_with("builtin:");
-            let hover_group = SharedString::from(format!("saved-command-row-hover-{index}"));
-            let preview = command
-                .command
-                .lines()
-                .map(str::trim)
-                .filter(|line| !line.is_empty())
-                .collect::<Vec<_>>()
-                .join(" ");
-            let mode_label = if builtin {
-                language.text(crate::i18n::Message::CommandsBuiltinLabel)
-            } else if command.append_enter {
-                language.pick("运行", "Run")
-            } else {
-                language.pick("插入", "Insert")
-            };
-            let run_tooltip = if command.append_enter {
-                language.pick("运行命令", "Run command")
-            } else {
-                language.pick("插入到当前终端", "Insert into current terminal")
-            };
-            let run_icon = command_run_icon(builtin, command.append_enter);
-            let run_command = command.clone();
-            let row_command = command.clone();
-            let copy_command = command.clone();
-            let edit_id = command.id.clone();
-            let delete_id = command.id.clone();
+        let mut command_iter = commands.into_iter().enumerate().peekable();
+        for (group_id, group_name) in groups {
+            rows.push(self.render_command_group_header(group_id.clone(), group_name, cx));
+            while command_iter.peek().is_some_and(|(_, command)| {
+                self.saved_commands.group_for(&command.id) == group_id.as_deref()
+            }) {
+                let (index, command) = command_iter.next().unwrap();
+                let selected = index == selected_index;
+                let builtin = command.id.starts_with("builtin:");
+                let hover_group = SharedString::from(format!("saved-command-row-hover-{index}"));
+                let preview = command
+                    .command
+                    .lines()
+                    .map(str::trim)
+                    .filter(|line| !line.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                let mode_label = if builtin {
+                    language.text(crate::i18n::Message::CommandsBuiltinLabel)
+                } else if command.append_enter {
+                    language.pick("运行", "Run")
+                } else {
+                    language.pick("插入", "Insert")
+                };
+                let run_tooltip = if command.append_enter {
+                    language.pick("运行命令", "Run command")
+                } else {
+                    language.pick("插入到当前终端", "Insert into current terminal")
+                };
+                let run_icon = command_run_icon(builtin, command.append_enter);
+                let drag = CommandDrag::new(&command);
+                let menu_id = command.id.clone();
+                let menu_button_id = command.id.clone();
+                let run_command = command.clone();
+                let row_command = command.clone();
+                let copy_command = command.clone();
+                let edit_id = command.id.clone();
+                let delete_id = command.id.clone();
 
-            rows.push(
-                h_flex()
-                    .id(SharedString::from(format!("saved-command-row-{index}")))
-                    .group(hover_group.clone())
-                    .w_full()
-                    .h(px(ROW_HEIGHT))
-                    .flex_shrink_0()
-                    .items_center()
-                    .gap(px(space::XS))
-                    .px_2()
-                    .when(list_scrollable, |row| row.pr(px(18.0)))
-                    .rounded(px(radius::CONTROL))
-                    .cursor_pointer()
-                    .when(selected, |row| row.bg(selected_bg))
-                    .when(!selected, |row| {
-                        row.group_hover(hover_group.clone(), |row| row.bg(hover_bg))
-                    })
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.command_manager_selected = index;
-                        this.dispatch_saved_command(row_command.clone(), window, cx);
-                    }))
-                    .child(
-                        Button::new(SharedString::from(format!("saved-command-run-{index}")))
-                            .icon(run_icon)
-                            .ghost()
-                            .xsmall()
-                            .tooltip(run_tooltip)
-                            .on_click(cx.listener(move |this, _, window, cx| {
+                rows.push(
+                    h_flex()
+                        .id(SharedString::from(format!("saved-command-row-{index}")))
+                        .debug_selector(move || format!("saved-command-row-{index}").into())
+                        .on_drag(drag, |drag, _, _, cx| cx.new(|_| drag.clone()))
+                        .on_mouse_down(
+                            MouseButton::Right,
+                            cx.listener(move |this, event: &MouseDownEvent, window, cx| {
                                 cx.stop_propagation();
-                                this.command_manager_selected = index;
-                                this.dispatch_saved_command(run_command.clone(), window, cx);
-                            })),
-                    )
-                    .child(
-                        v_flex()
-                            .flex_1()
-                            .min_w_0()
-                            .gap(px(space::XXS))
-                            .child(
-                                h_flex()
-                                    .w_full()
-                                    .min_w_0()
-                                    .gap_2()
-                                    .items_center()
-                                    .child(
-                                        div()
-                                            .min_w_0()
-                                            .truncate()
-                                            .text_sm()
-                                            .font_weight(FontWeight::MEDIUM)
-                                            .text_color(foreground)
-                                            .child(command.name),
-                                    )
-                                    .child(
-                                        div()
-                                            .flex_shrink_0()
-                                            .rounded(px(radius::CHIP))
-                                            .border_1()
-                                            .border_color(border)
-                                            .px_1()
-                                            .text_size(px(10.0))
-                                            .text_color(if selected { accent } else { muted })
-                                            .child(mode_label),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .w_full()
-                                    .min_w_0()
-                                    .truncate()
-                                    .font_family(mono_family.clone())
-                                    .text_size(px(11.0))
-                                    .text_color(muted)
-                                    .child(preview),
-                            ),
-                    )
-                    .child(
-                        h_flex()
-                            .flex_shrink_0()
-                            .items_center()
-                            .gap_1()
-                            .child(
-                                Button::new(SharedString::from(format!(
-                                    "saved-command-copy-{index}"
-                                )))
-                                .icon(IconName::Copy)
+                                this.open_command_group_menu(
+                                    menu_id.clone(),
+                                    event.position,
+                                    window,
+                                    cx,
+                                );
+                            }),
+                        )
+                        .group(hover_group.clone())
+                        .w_full()
+                        .h(px(ROW_HEIGHT))
+                        .flex_shrink_0()
+                        .items_center()
+                        .gap(px(space::XS))
+                        .px_2()
+                        .when(list_scrollable, |row| row.pr(px(18.0)))
+                        .rounded(px(radius::CONTROL))
+                        .cursor_pointer()
+                        .when(selected, |row| row.bg(selected_bg))
+                        .when(!selected, |row| {
+                            row.group_hover(hover_group.clone(), |row| row.bg(hover_bg))
+                        })
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.command_manager_selected = index;
+                            this.dispatch_saved_command(row_command.clone(), window, cx);
+                        }))
+                        .child(
+                            Button::new(SharedString::from(format!("saved-command-run-{index}")))
+                                .icon(run_icon)
                                 .ghost()
                                 .xsmall()
-                                .tooltip(language.pick("复制命令", "Copy command"))
-                                .on_click(cx.listener(
-                                    move |this, _, window, cx| {
-                                        cx.stop_propagation();
-                                        this.copy_saved_command(&copy_command, window, cx);
-                                    },
-                                )),
-                            )
-                            .child(
-                                Button::new(SharedString::from(format!(
-                                    "saved-command-edit-{index}"
-                                )))
-                                .icon(custom_icon(crate::gpui_shell::assets::nav::PENCIL))
-                                .ghost()
-                                .xsmall()
-                                .tooltip(if builtin {
-                                    language.text(crate::i18n::Message::CommandsSaveCopy)
-                                } else {
-                                    language.pick("编辑命令", "Edit command")
-                                })
-                                .on_click(cx.listener(
-                                    move |this, _, window, cx| {
-                                        cx.stop_propagation();
-                                        this.open_saved_command_editor(
-                                            Some(edit_id.clone()),
-                                            window,
-                                            cx,
-                                        );
-                                    },
-                                )),
-                            )
-                            .when(!builtin, |actions| {
-                                actions.child(
+                                .tooltip(run_tooltip)
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    cx.stop_propagation();
+                                    this.command_manager_selected = index;
+                                    this.dispatch_saved_command(run_command.clone(), window, cx);
+                                })),
+                        )
+                        .child(
+                            v_flex()
+                                .flex_1()
+                                .min_w_0()
+                                .gap(px(space::XXS))
+                                .child(
+                                    h_flex()
+                                        .w_full()
+                                        .min_w_0()
+                                        .gap_2()
+                                        .items_center()
+                                        .child(
+                                            div()
+                                                .min_w_0()
+                                                .truncate()
+                                                .text_sm()
+                                                .font_weight(FontWeight::MEDIUM)
+                                                .text_color(foreground)
+                                                .child(command.name),
+                                        )
+                                        .child(
+                                            div()
+                                                .flex_shrink_0()
+                                                .rounded(px(radius::CHIP))
+                                                .border_1()
+                                                .border_color(border)
+                                                .px_1()
+                                                .text_size(px(10.0))
+                                                .text_color(if selected { accent } else { muted })
+                                                .child(mode_label),
+                                        ),
+                                )
+                                .child(
+                                    div()
+                                        .w_full()
+                                        .min_w_0()
+                                        .truncate()
+                                        .font_family(mono_family.clone())
+                                        .text_size(px(11.0))
+                                        .text_color(muted)
+                                        .child(preview),
+                                ),
+                        )
+                        .child(
+                            h_flex()
+                                .flex_shrink_0()
+                                .items_center()
+                                .gap_1()
+                                .child(
                                     Button::new(SharedString::from(format!(
-                                        "saved-command-delete-{index}"
+                                        "saved-command-group-menu-{index}"
                                     )))
-                                    .icon(custom_icon(crate::gpui_shell::assets::nav::TRASH))
+                                    .icon(IconName::EllipsisVertical)
                                     .ghost()
                                     .xsmall()
-                                    .tooltip(language.pick("删除命令", "Delete command"))
+                                    .tooltip(
+                                        language.text(crate::i18n::Message::CommandsMoveToGroup),
+                                    )
                                     .on_click(cx.listener(
                                         move |this, _, window, cx| {
                                             cx.stop_propagation();
-                                            this.open_delete_saved_command_dialog(
-                                                delete_id.clone(),
+                                            this.open_command_group_menu(
+                                                menu_button_id.clone(),
+                                                window.mouse_position(),
                                                 window,
                                                 cx,
                                             );
                                         },
                                     )),
                                 )
-                            }),
-                    )
-                    .into_any_element(),
-            );
+                                .child(
+                                    Button::new(SharedString::from(format!(
+                                        "saved-command-copy-{index}"
+                                    )))
+                                    .icon(IconName::Copy)
+                                    .ghost()
+                                    .xsmall()
+                                    .tooltip(language.pick("复制命令", "Copy command"))
+                                    .on_click(cx.listener(
+                                        move |this, _, window, cx| {
+                                            cx.stop_propagation();
+                                            this.copy_saved_command(&copy_command, window, cx);
+                                        },
+                                    )),
+                                )
+                                .child(
+                                    Button::new(SharedString::from(format!(
+                                        "saved-command-edit-{index}"
+                                    )))
+                                    .icon(custom_icon(crate::gpui_shell::assets::nav::PENCIL))
+                                    .ghost()
+                                    .xsmall()
+                                    .tooltip(if builtin {
+                                        language.text(crate::i18n::Message::CommandsSaveCopy)
+                                    } else {
+                                        language.pick("编辑命令", "Edit command")
+                                    })
+                                    .on_click(cx.listener(
+                                        move |this, _, window, cx| {
+                                            cx.stop_propagation();
+                                            this.open_saved_command_editor(
+                                                Some(edit_id.clone()),
+                                                window,
+                                                cx,
+                                            );
+                                        },
+                                    )),
+                                )
+                                .when(!builtin, |actions| {
+                                    actions.child(
+                                        Button::new(SharedString::from(format!(
+                                            "saved-command-delete-{index}"
+                                        )))
+                                        .icon(custom_icon(crate::gpui_shell::assets::nav::TRASH))
+                                        .ghost()
+                                        .xsmall()
+                                        .tooltip(language.pick("删除命令", "Delete command"))
+                                        .on_click(
+                                            cx.listener(move |this, _, window, cx| {
+                                                cx.stop_propagation();
+                                                this.open_delete_saved_command_dialog(
+                                                    delete_id.clone(),
+                                                    window,
+                                                    cx,
+                                                );
+                                            }),
+                                        ),
+                                    )
+                                }),
+                        )
+                        .into_any_element(),
+                );
+            }
         }
 
         let search_box = h_flex()
@@ -832,8 +889,21 @@ impl NebulaWorkspace {
                             }))
                             .child(Icon::new(IconName::Plus).xsmall())
                             .child(language.pick("新增命令", "Command")),
+                    )
+                    .child(
+                        Button::new("saved-command-add-group")
+                            .w_full()
+                            .h(px(PANEL_FOOTER_HEIGHT))
+                            .ghost()
+                            .icon(IconName::Folder)
+                            .label(language.text(crate::i18n::Message::CommandsAddGroup))
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                cx.stop_propagation();
+                                this.open_command_group_editor(window, cx);
+                            })),
                     ),
             )
+            .children(self.render_command_group_menu())
             .into_any_element()
     }
 }
@@ -852,3 +922,6 @@ mod tests {
 
 #[cfg(all(test, feature = "gpui-test-support"))]
 mod input_tests;
+
+#[cfg(all(test, feature = "gpui-test-support"))]
+mod group_tests;

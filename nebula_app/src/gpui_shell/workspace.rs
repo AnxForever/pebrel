@@ -753,6 +753,7 @@ pub struct NebulaWorkspace {
     /// 用户命令管理器贴在右侧覆盖显示，不占终端布局宽度，也不复用应用动作
     /// 命令面板的状态，避免两种“命令”语义互相污染。
     command_manager_open: bool,
+    command_group_menu: Option<command_manager::GroupMenu>,
     command_manager_input: Entity<InputState>,
     command_manager_selected: usize,
     command_manager_scroll: gpui::ScrollHandle,
@@ -1033,6 +1034,7 @@ impl NebulaWorkspace {
             command_palette_input,
             command_palette_selected: 0,
             command_manager_open: false,
+            command_group_menu: None,
             command_manager_input,
             command_manager_selected: 0,
             command_manager_scroll: gpui::ScrollHandle::new(),

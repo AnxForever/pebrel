@@ -1,6 +1,8 @@
 //! User-managed shell commands shown by the GPUI command manager.
 
 pub(crate) mod builtins;
+mod groups;
+pub(crate) use groups::BUILTIN_GROUP_ID;
 
 use std::collections::HashSet;
 use std::io;
@@ -35,11 +37,25 @@ struct CommandStore {
     version: u32,
     #[serde(default)]
     commands: Vec<SavedCommand>,
+    #[serde(default)]
+    organization: groups::Organization,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SavedCommands {
+    path: PathBuf,
     commands: Vec<SavedCommand>,
+    organization: groups::Organization,
+}
+
+impl Default for SavedCommands {
+    fn default() -> Self {
+        Self {
+            path: store_path(),
+            commands: Vec::new(),
+            organization: groups::Organization::default(),
+        }
+    }
 }
 
 impl SavedCommands {
@@ -47,10 +63,12 @@ impl SavedCommands {
         Self::load_from(&store_path())
     }
 
-    fn load_from(path: &Path) -> io::Result<Self> {
+    pub(crate) fn load_from(path: &Path) -> io::Result<Self> {
         let bytes = match std::fs::read(path) {
             Ok(bytes) => bytes,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Self::default()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return Ok(Self { path: path.to_owned(), ..Self::default() });
+            },
             Err(error) => return Err(error),
         };
         let store: CommandStore = serde_json::from_slice(&bytes)
@@ -62,7 +80,13 @@ impl SavedCommands {
             ));
         }
         validate_store(&store.commands)?;
-        Ok(Self { commands: store.commands })
+        let saved = Self {
+            path: path.to_owned(),
+            commands: store.commands,
+            organization: store.organization,
+        };
+        saved.validate_groups()?;
+        Ok(saved)
     }
 
     pub(crate) fn commands(&self) -> &[SavedCommand] {
@@ -70,7 +94,7 @@ impl SavedCommands {
     }
 
     pub(crate) fn reload(&mut self) -> io::Result<()> {
-        *self = Self::load()?;
+        *self = Self::load_from(&self.path)?;
         Ok(())
     }
 
@@ -80,8 +104,9 @@ impl SavedCommands {
         command: &str,
         append_enter: bool,
     ) -> io::Result<SavedCommand> {
-        let path = store_path();
-        let (next, inserted) = mutate_store(&path, |commands| {
+        let path = self.path.clone();
+        let (next, inserted) = mutate_store(&path, |store| {
+            let commands = &mut store.commands;
             if commands.len() >= MAX_COMMANDS {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
@@ -108,8 +133,9 @@ impl SavedCommands {
         command: &str,
         append_enter: bool,
     ) -> io::Result<()> {
-        let path = store_path();
-        let (next, ()) = mutate_store(&path, |commands| {
+        let path = self.path.clone();
+        let (next, ()) = mutate_store(&path, |store| {
+            let commands = &mut store.commands;
             let (name, command) = normalize_fields(name, command)?;
             let Some(saved) = commands.iter_mut().find(|saved| saved.id == id) else {
                 return Err(io::Error::new(io::ErrorKind::NotFound, "saved command not found"));
@@ -124,12 +150,14 @@ impl SavedCommands {
     }
 
     pub(crate) fn remove(&mut self, id: &str) -> io::Result<()> {
-        let path = store_path();
-        let (next, ()) = mutate_store(&path, |commands| {
+        let path = self.path.clone();
+        let (next, ()) = mutate_store(&path, |store| {
+            let commands = &mut store.commands;
             let Some(index) = commands.iter().position(|saved| saved.id == id) else {
                 return Err(io::Error::new(io::ErrorKind::NotFound, "saved command not found"));
             };
             commands.remove(index);
+            store.organization.membership.remove(id);
             Ok(())
         })?;
         *self = next;
@@ -139,7 +167,7 @@ impl SavedCommands {
 
 fn mutate_store<T>(
     path: &Path,
-    mutate: impl FnOnce(&mut Vec<SavedCommand>) -> io::Result<T>,
+    mutate: impl FnOnce(&mut SavedCommands) -> io::Result<T>,
 ) -> io::Result<(SavedCommands, T)> {
     let Some(_lock) = crate::atomic_file::try_lock(path)? else {
         return Err(io::Error::new(
@@ -150,9 +178,14 @@ fn mutate_store<T>(
     // 锁内重新读盘：多个 Nebula 窗口同时管理命令时，不能拿各自启动时的旧快照
     // 覆盖对方刚写入的列表。
     let mut saved = SavedCommands::load_from(path)?;
-    let result = mutate(&mut saved.commands)?;
+    let result = mutate(&mut saved)?;
     validate_store(&saved.commands)?;
-    let store = CommandStore { version: STORE_VERSION, commands: saved.commands.clone() };
+    saved.validate_groups()?;
+    let store = CommandStore {
+        version: STORE_VERSION,
+        commands: saved.commands.clone(),
+        organization: saved.organization.clone(),
+    };
     let bytes = serde_json::to_vec_pretty(&store).map_err(io::Error::other)?;
     crate::atomic_file::write(path, &bytes)?;
     Ok((saved, result))
@@ -240,7 +273,8 @@ mod tests {
     fn versioned_store_round_trips_and_rejects_invalid_rows() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join(STORE_FILE);
-        let (saved, inserted) = mutate_store(&path, |commands| {
+        let (saved, inserted) = mutate_store(&path, |store| {
+            let commands = &mut store.commands;
             let (name, command) = normalize_fields(" Start backend ", " cargo run ")?;
             let saved =
                 SavedCommand { id: "cmd-test".to_owned(), name, command, append_enter: false };
