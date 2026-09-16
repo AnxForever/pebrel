@@ -41,6 +41,9 @@ use crate::runtime_api::{
     ApiError, RuntimeCommand, RuntimeDispatch, RuntimeSnapshot, RuntimeWindow,
 };
 
+#[cfg(all(test, feature = "gpui-test-support"))]
+mod transfer_tests;
+
 /// 新窗口的首帧内容。只有进程的第一个窗口恢复全局 session；其它窗口必须
 /// 明确创建一个新终端或暂时保持空白，不能把同一份 session 重放多次。
 pub(crate) enum WorkspaceStartup {
@@ -227,19 +230,9 @@ pub(crate) fn initialize(cx: &mut App, runtime_hub: crate::runtime_api::RuntimeH
         async {}
     });
     let closed_subscription = cx.on_window_closed(|cx, _window_id| {
-        prune_entries(cx);
-        // 快速终端不能改变普通 session 的生命周期：最后一扇普通窗口关闭后，
-        // 即使隐藏的 Quake 窗口仍存活，也不能再补写一份空的普通 session。
-        if cx
-            .global::<WindowRegistry>()
-            .entries
-            .iter()
-            .any(|entry| entry.role == WindowRole::Regular)
-        {
-            if let Err(error) = save_combined_session(cx, false) {
-                log::warn!("Session checkpoint: {error}");
-            }
-        }
+        // A tab transfer can close its source while the destination workspace
+        // is still borrowed. Snapshot all windows only after that update ends.
+        cx.defer(save_after_window_closed);
     });
     cx.global_mut::<WindowRegistry>()
         ._subscriptions
@@ -252,6 +245,17 @@ pub(crate) fn initialize(cx: &mut App, runtime_hub: crate::runtime_api::RuntimeH
         }
     })
     .detach();
+}
+
+fn save_after_window_closed(cx: &mut App) {
+    prune_entries(cx);
+    // 快速终端不能改变普通 session 的生命周期：最后一扇普通窗口关闭后，
+    // 即使隐藏的 Quake 窗口仍存活，也不能再补写一份空的普通 session。
+    if cx.global::<WindowRegistry>().entries.iter().any(|entry| entry.role == WindowRole::Regular) {
+        if let Err(error) = save_combined_session(cx, false) {
+            log::warn!("Session checkpoint: {error}");
+        }
+    }
 }
 
 pub(crate) fn open_initial_window(

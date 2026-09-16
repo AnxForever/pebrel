@@ -175,6 +175,7 @@ impl NebulaWorkspace {
                 };
                 let TabPresentation {
                     title,
+                    tooltip,
                     is_settings,
                     activity,
                     logo_image,
@@ -266,6 +267,9 @@ impl NebulaWorkspace {
 
                 let row = h_flex()
                     .id(("top-tab", ix))
+                    .when_some(tooltip, |row, text| row.tooltip(move |window, cx| {
+                        super::tab_presentation::tooltip(text.clone(), window, cx)
+                    }))
                     .debug_selector(|| format!("top-tab-{ix}"))
                     .group(hover_group.clone())
                     .relative()

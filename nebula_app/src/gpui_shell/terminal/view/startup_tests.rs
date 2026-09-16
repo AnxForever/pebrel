@@ -61,6 +61,43 @@ fn feed(view: &mut TerminalView, bytes: &[u8]) {
 }
 
 #[gpui::test]
+fn ssh_tab_name_and_hover_preserve_host_identity_across_remote_titles(cx: &mut TestAppContext) {
+    let (view, window, _) = open(cx);
+    view.update(window, |view, cx| {
+        view.ssh_destination = Some("root@192.0.2.10:2222".into());
+        view.ssh_label = Some("SG-1 新加坡".into());
+        view.process_event(Event::CwdReport("/srv/project".into()), cx);
+        view.process_event(Event::Title("NEBULA|/srv/project|main|htop".into()), cx);
+        assert_eq!(view.tab_label(), "SG-1 新加坡");
+        assert_eq!(
+            view.tab_tooltip("SG-1 新加坡"),
+            "SG-1 新加坡\nroot@192.0.2.10:2222\n/srv/project\nhtop"
+        );
+        assert!(
+            view.tab_tooltip("手动命名").starts_with("手动命名\nSG-1 新加坡\nroot@192.0.2.10:2222")
+        );
+        view.ssh_label = None;
+        assert_eq!(view.tab_label(), "root@192.0.2.10:2222");
+    });
+}
+
+#[gpui::test]
+fn ai_tab_hover_shows_full_directory_and_reported_task_but_not_stale_task(cx: &mut TestAppContext) {
+    let (view, window, _) = open(cx);
+    view.update(window, |view, cx| {
+        view.process_event(Event::CwdReport("/home/test/很长的项目目录".into()), cx);
+        view.running_program = Some("codex".into());
+        view.process_event(Event::Title("修复 SSH 标签名称".into()), cx);
+        assert_eq!(view.tab_label(), "很长的项目目录");
+        let hover = view.tab_tooltip(&view.tab_label());
+        assert!(hover.contains("/home/test/很长的项目目录"));
+        assert!(hover.contains("修复 SSH 标签名称"));
+        view.process_event(Event::CommandDone { exit_code: Some(0) }, cx);
+        assert!(!view.tab_tooltip(&view.tab_label()).contains("修复 SSH 标签名称"));
+    });
+}
+
+#[gpui::test]
 fn review_regression_cold_resume_survives_initial_prompt_and_clears_on_exit(
     cx: &mut TestAppContext,
 ) {

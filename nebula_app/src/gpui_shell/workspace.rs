@@ -76,6 +76,8 @@ mod ssh_dialog;
 mod tab_drag;
 mod tab_duplication;
 mod tab_menu;
+mod tab_presentation;
+use tab_presentation::TabPresentation;
 mod tab_scroll;
 mod top_tabs;
 mod update_dialog;
@@ -664,22 +666,6 @@ struct TabRename {
     ix: usize,
     input: Entity<InputState>,
     _subscription: Subscription,
-}
-
-/// 两种 tab 布局共用的只读展示数据。状态与动作仍由 `NebulaWorkspace`
-/// 持有；这里只集中 cwd 标题、程序图标、AI 活动和用户元数据的解释。
-struct TabPresentation {
-    title: SharedString,
-    is_settings: bool,
-    activity: SidebarActivity,
-    logo_image: Option<Arc<RenderImage>>,
-    program_glyph: Option<&'static str>,
-    shell_tag: Option<SharedString>,
-    color: Option<Rgb>,
-    renaming: Option<Entity<InputState>>,
-    /// 本 tab 的分屏数（Terminal tab 才 > 0）。`> 1` 时行首图标换成 2×2 分屏
-    /// 标记、行尾挂一枚数量胶囊；见 [`pane_header::split_badge`]。
-    pane_count: usize,
 }
 
 /// 旧壳 `TabRequest::CommitRename`（`window_context.rs` ~871-880）：
@@ -2785,33 +2771,6 @@ impl NebulaWorkspace {
             _ => self.focus_active(window, cx),
         }
         cx.notify();
-    }
-
-    /// 完整标签文本。**不在这里截断**：可见宽度是布局问题，字符数上限会在
-    /// 窄侧栏下漏出、在宽侧栏下白扔字符。截断由 `render_sidebar` 按实测
-    /// cell 宽换算成列数后交给旧壳的 `truncate_tab_label`（带省略号）。
-    fn tab_title(&self, ix: usize, cx: &App) -> SharedString {
-        if let Some(custom) = self.meta(ix).custom_name {
-            return custom.into();
-        }
-        match &self.tabs[ix] {
-            WorkspaceTab::Settings { .. } => "设置".into(),
-            WorkspaceTab::Image { view } => view.read(cx).title.clone().into(),
-            WorkspaceTab::Document { view, .. } => view.read(cx).tab_title().into(),
-            WorkspaceTab::Code { view, .. } => view.read(cx).tab_title(cx).into(),
-            tab @ WorkspaceTab::Terminal { .. } => {
-                // 标签 = 聚焦 pane 的 cwd 末级目录名（旧壳 chrome_tab_label
-                // 规则）。分屏计数**不拼在这里**：这份字符串还要喂给 runtime
-                // API 的 tab label、跨窗拖拽标题和重命名预填，掺进 "⊞2" 会
-                // 一路泄漏，而且长标题下会被 truncate_tab_label 截掉、被
-                // custom_name 整条顶掉。计数改由 TabPresentation::pane_count
-                // 单独画成胶囊，见 sidebar/top_tabs 的渲染。
-                match tab.focused_view() {
-                    Some(view) => view.read(cx).tab_label().into(),
-                    None => SharedString::from("shell"),
-                }
-            },
-        }
     }
 
     fn select_side_panel_view(
