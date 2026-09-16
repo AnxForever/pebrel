@@ -254,6 +254,7 @@ impl TerminalView {
             image_paste: image_paste::ImagePasteState::default(),
             path_drop: path_drop::PathDropState::default(),
             ssh_destination,
+            ssh_label: None,
             exec_context,
             ssh_stage: None,
             ssh_connect: None,
@@ -319,6 +320,7 @@ impl TerminalView {
         if let Some(session) = &view.session {
             session.term.lock().set_color_scheme(view.palette.is_dark());
         }
+        view.refresh_ssh_label();
         view.restart_cursor_blink(cx);
         view
     }

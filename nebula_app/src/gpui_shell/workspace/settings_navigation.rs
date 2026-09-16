@@ -123,6 +123,7 @@ impl NebulaWorkspace {
         }
         TabPresentation {
             title: super::workspace_ui_language().text(crate::i18n::Message::CommonSettings).into(),
+            tooltip: None,
             is_settings: true,
             activity: SidebarActivity::Idle,
             logo_image: None,

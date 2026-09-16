@@ -721,3 +721,38 @@ settings files.
 - **Validation:** A bilingual release without Contributors passes. Empty,
   duplicated, unlinked or misplaced contributor sections fail; language and
   asset checksum contracts remain required.
+
+## ADR-0020 — Saved command organization
+
+- **Status:** User-requested working-tree implementation, 2026-09-16; pending
+  repository review by `@Kuddev`. No release claim.
+- **Context:** Users need named command groups, builtin defaults, drag assignment
+  and removal without duplicating immutable builtin command templates.
+- **Decision:** Add optional organization metadata to the existing version 1
+  command store. Stable group IDs and command IDs own membership; names remain
+  display text. Absent builtin membership means the builtin group; explicit null
+  means ungrouped. Old stores load unchanged. Older applications can read command
+  content but do not preserve this additional metadata when rewriting the store.
+  The user also requested deletable builtins: an optional `deleted_builtins` set
+  records stable IDs in the same store. Template content stays in the catalog;
+  changing language, platform or grouping cannot bring a deleted entry back.
+  Older applications also discard this set on rewrite.
+- **Ownership:** `saved_commands` remains the sole validation and persistence
+  authority. Every mutation locks, reloads, validates and atomically writes both
+  commands and organization. No extra file, dependency, worker or service is added.
+  The UI sorts and renders a snapshot; it never writes JSON itself.
+- **Alternatives:** Per-command group fields would require materializing builtin
+  templates and could freeze their platform/localization behavior. A separate
+  group file would need a transaction spanning two files.
+- **Consequences:** Deleting a group leaves its commands ungrouped; deleting a
+  command removes its membership. Stale drag targets fail without changing disk.
+  Deleted builtin IDs remain valid after catalog reduction, but cannot be assigned
+  to a group. Concurrent mutations preserve deletions through the same transaction.
+  Search and keyboard selection use the same displayed command order; headings
+  never execute commands. Group names and counts use bounded validation.
+- **Validation:** Regression coverage includes old stores, explicit builtin
+  removal, restart persistence, stale targets and serialized multiwindow writes.
+  Actual GPUI drag, menu and keyboard checks are reported separately from model
+  tests; a successful compile is not visual acceptance.
+- **Revisit condition:** Reconsider schema versioning if preserving organization
+  through edits by older application versions becomes a supported requirement.

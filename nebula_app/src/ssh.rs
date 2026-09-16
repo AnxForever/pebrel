@@ -435,31 +435,105 @@ fn already_has_tty(args: &[String]) -> bool {
 /// `?`) and negations are skipped: they are match rules, not destinations
 /// you can click to connect to. Missing/unreadable config → empty list
 /// (the section simply doesn't render).
-pub fn ssh_config_hosts() -> Vec<String> {
-    let Some(home) = crate::platform::dirs::home_dir() else { return Vec::new() };
-    let Ok(data) = std::fs::read_to_string(home.join(".ssh").join("config")) else {
-        return Vec::new();
-    };
-    let mut hosts = Vec::new();
-    for line in data.lines() {
-        let line = line.trim();
-        let Some(rest) = line
-            .strip_prefix("Host ")
-            .or_else(|| line.strip_prefix("host "))
-            .or_else(|| line.strip_prefix("Host\t"))
-        else {
+pub(crate) fn ssh_config_path() -> Option<std::path::PathBuf> {
+    let home = crate::platform::dirs::home_dir()?;
+    let path = home.join(".ssh").join("config");
+    path.is_file().then_some(path)
+}
+
+/// Read the same per-user file used by host discovery and the OpenSSH probe.
+/// Invalid encodings must not silently corrupt hostnames or identity paths.
+pub(crate) fn read_ssh_config() -> std::io::Result<String> {
+    let path = ssh_config_path().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::NotFound, "SSH config file not found")
+    })?;
+    std::fs::read_to_string(path)
+}
+
+/// Tokenize one OpenSSH config line, preserving quoted spaces and Windows
+/// backslashes while treating an unquoted `#` after whitespace as a comment.
+pub(crate) fn ssh_config_tokens(line: &str) -> Vec<String> {
+    ssh_config_tokens_checked(line).unwrap_or_default()
+}
+
+pub(crate) fn ssh_config_tokens_checked(line: &str) -> std::io::Result<Vec<String>> {
+    let line = line.trim_start_matches('\u{feff}').trim_start();
+    if line.is_empty() || line.starts_with('#') {
+        return Ok(Vec::new());
+    }
+    let boundary = line.find(|ch: char| ch.is_whitespace() || ch == '=').unwrap_or(line.len());
+    let (keyword, rest) = line.split_at(boundary);
+    let rest = rest.trim_start().strip_prefix('=').unwrap_or(rest.trim_start()).trim_start();
+    let mut tokens = vec![keyword.to_owned()];
+    let mut current = String::new();
+    let mut quote = None;
+    let mut separated = true;
+
+    for character in rest.chars() {
+        if let Some(delimiter) = quote {
+            if character == delimiter {
+                quote = None;
+            } else {
+                current.push(character);
+            }
+            separated = false;
             continue;
-        };
-        for name in rest.split_whitespace() {
-            if name.contains(['*', '?']) || name.starts_with('!') {
+        }
+        match character {
+            '\'' | '"' => {
+                quote = Some(character);
+                separated = false;
+            },
+            '#' if separated => break,
+            character if character.is_whitespace() => {
+                if !current.is_empty() {
+                    tokens.push(std::mem::take(&mut current));
+                }
+                separated = true;
+            },
+            character => {
+                current.push(character);
+                separated = false;
+            },
+        }
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    if quote.is_some() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "Unterminated SSH config quote",
+        ));
+    }
+    Ok(tokens)
+}
+
+fn parse_ssh_config_hosts(text: &str) -> Vec<String> {
+    let mut hosts = Vec::new();
+    for line in text.lines() {
+        let tokens = ssh_config_tokens(line);
+        if tokens.first().is_none_or(|keyword| !keyword.eq_ignore_ascii_case("host")) {
+            continue;
+        }
+        for name in tokens.into_iter().skip(1) {
+            if name.contains(['*', '?'])
+                || name.starts_with('!')
+                || crate::ssh_profiles::validate_ssh_destination(&name).is_err()
+            {
                 continue;
             }
-            if !hosts.iter().any(|h| h == name) {
-                hosts.push(name.to_owned());
+            if !hosts.iter().any(|host| host == &name) {
+                hosts.push(name);
             }
         }
     }
     hosts
+}
+
+pub fn ssh_config_hosts() -> Vec<String> {
+    let Ok(data) = read_ssh_config() else { return Vec::new() };
+    parse_ssh_config_hosts(&data)
 }
 
 fn askpass_destination_from_args(args: &[String]) -> Option<String> {
@@ -670,6 +744,38 @@ pub fn run(args: Vec<String>) -> i32 {
         let _ = std::fs::remove_file(context.attempt_path);
     }
     result
+}
+
+#[cfg(test)]
+mod ssh_config_tests {
+    use super::{parse_ssh_config_hosts, ssh_config_tokens};
+
+    #[test]
+    fn config_tokens_handle_bom_quotes_comments_and_windows_paths() {
+        assert_eq!(
+            ssh_config_tokens("\u{feff}  IdentityFile \"D:\\keys\\key one.pem\" # note"),
+            vec!["IdentityFile", r"D:\keys\key one.pem"]
+        );
+        assert_eq!(
+            ssh_config_tokens("HostName server#with-hash"),
+            vec!["HostName", "server#with-hash"]
+        );
+        assert_eq!(ssh_config_tokens("HostName server # comment"), vec!["HostName", "server"]);
+    }
+
+    #[test]
+    fn config_hosts_accept_indentation_case_and_multiple_patterns() {
+        let config = concat!(
+            "\u{feff}\r\n",
+            "  hOsT rain staging !ignored\r\n",
+            "    HostName 192.168.100.3\r\n",
+            "Host *\r\n",
+            "Host ?\r\n",
+            "Host ignored\r\n",
+            "HostName ignored.example\r\n",
+        );
+        assert_eq!(parse_ssh_config_hosts(config), vec!["rain", "staging", "ignored"]);
+    }
 }
 
 #[cfg(all(test, windows))]

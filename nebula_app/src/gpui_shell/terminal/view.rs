@@ -14,6 +14,7 @@ mod startup;
 mod startup_command;
 #[cfg(all(test, feature = "gpui-test-support"))]
 mod startup_tests;
+mod tab_identity;
 mod typography;
 
 pub use broadcast::TerminalInput;
@@ -346,6 +347,7 @@ pub struct TerminalView {
     path_drop: path_drop::PathDropState,
     /// SSH 直连目的地（`user@host[:port]`）；本地会话为 None。
     pub ssh_destination: Option<String>,
+    ssh_label: Option<String>,
     /// 创建本地 PTY 时冻结的受控环境，供独立 `pane.exec` child 复用。
     pub(crate) exec_context: Option<crate::runtime_exec::PaneExecContext>,
     /// SSH 连接阶段（业务层上报）：Ready 前画连接横幅，Failed 驻留错误。
@@ -849,6 +851,7 @@ impl TerminalView {
     /// 热应用运行时设置（设置页改动后由宿主调用）。默认光标样式只更新
     /// `Term` 的 fallback；程序通过 DECSCUSR 设置的临时样式仍保持权威。
     pub fn apply_settings(&mut self, cx: &mut Context<Self>) {
+        self.refresh_ssh_label();
         let Some(settings) = cx.try_global::<Settings>() else { return };
         let families = [
             settings.font_family.clone(),
@@ -905,20 +908,6 @@ impl TerminalView {
         }
         self.restart_cursor_blink(cx);
         cx.notify();
-    }
-
-    /// 侧栏 tab 标签：旧壳 `chrome_tab_label` 只认**路径末级名**。
-    /// OSC 标题（脚本名、`NEBULA|…` 整串）只属于窗口标题，绝不能当标签，
-    /// 否则跑脚本时侧栏会变成 `foo.ps1`，cwd 上报失败时还会拼出
-    /// `.tmp-stay-launch.tmp-stay-launch` 这种重复段。
-    pub fn tab_label(&self) -> String {
-        last_path_component(&self.cwd)
-            .or_else(|| {
-                std::env::current_dir()
-                    .ok()
-                    .and_then(|path| last_path_component(&path.to_string_lossy()))
-            })
-            .unwrap_or_else(|| ".".to_owned())
     }
 
     pub fn grid_rows(&self) -> usize {
