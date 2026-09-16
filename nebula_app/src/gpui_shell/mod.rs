@@ -361,6 +361,8 @@ pub(crate) fn apply_app_icon(variant: nebula_settings::AppIconName, cx: &mut App
     }
     crate::tray::refresh_app_icon();
     #[cfg(windows)]
+    crate::app_icon::refresh_pinned(variant);
+    #[cfg(windows)]
     cx.defer(|cx| {
         for handle in cx.windows() {
             if let Err(error) = handle.update(cx, |_, window, _| set_native_window_icon(window)) {

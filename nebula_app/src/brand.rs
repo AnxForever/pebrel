@@ -1,4 +1,6 @@
 pub const NAME: &str = "Pebrel";
+#[cfg(windows)]
+pub const WINDOWS_APP_ID: &str = "com.pebrel.terminal";
 pub const DESCRIPTION: &str = "Pebrel — a GPU-accelerated terminal emulator";
 
 #[cfg(test)]
