@@ -9,6 +9,46 @@ FIXTURES = ROOT / "nebula_terminal/tests/ref"
 
 
 class GitAttributeTests(unittest.TestCase):
+    def test_embedded_shell_scripts_survive_autocrlf_checkout(self):
+        paths = [
+            "nebula_terminal/src/tty/connection.sh",
+            "nebula_app/src/platform/pi_session.sh",
+            *(
+                path.relative_to(ROOT).as_posix()
+                for path in sorted((ROOT / "nebula_app/res/shell").iterdir())
+                if path.is_file()
+            ),
+        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary) / "repository"
+            checkout = Path(temporary) / "checkout"
+            repository.mkdir()
+            git = ["git", "-C", str(repository)]
+            subprocess.run([*git, "init", "--quiet"], check=True)
+            subprocess.run([*git, "config", "core.autocrlf", "true"], check=True)
+            (repository / ".gitattributes").write_bytes((ROOT / ".gitattributes").read_bytes())
+            originals = {}
+            for path in paths:
+                original = (ROOT / path).read_bytes().replace(b"\r\n", b"\n")
+                self.assertIn(b"\n", original)
+                originals[path] = original
+                target = repository / path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(original)
+            # Prove autocrlf actually rewrites an unprotected shell script.
+            (repository / "control.sh").write_bytes(b"function example() {\n    :\n}\n")
+            subprocess.run([*git, "add", "--", ".gitattributes", "control.sh", *paths], check=True)
+            subprocess.run(
+                [*git, "checkout-index", "--all", f"--prefix={checkout.as_posix()}/"],
+                check=True,
+            )
+            self.assertIn(b"\r\n", (checkout / "control.sh").read_bytes())
+            for path, original in originals.items():
+                with self.subTest(path=path):
+                    actual = (checkout / path).read_bytes()
+                    self.assertEqual(actual, original)
+                    self.assertNotIn(b"\r\n", actual)
+
     def test_git_preserves_raw_terminal_streams(self):
         paths = sorted(str(path.relative_to(ROOT)).replace("\\", "/") for path in FIXTURES.rglob("*.recording"))
         self.assertTrue(paths)

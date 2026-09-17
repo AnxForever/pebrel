@@ -1017,7 +1017,7 @@ fi
 
 fn nebula_bash_rc_path() -> Option<std::path::PathBuf> {
     let path = std::env::temp_dir().join("pebrel_bashrc");
-    let script = format!("{NEBULA_BASH_RC}\n{}", super::CONNECTION_SHELL);
+    let script = format!("{NEBULA_BASH_RC}\n{}", super::connection_shell());
     write_if_changed(&path, script.as_bytes()).then_some(path)
 }
 

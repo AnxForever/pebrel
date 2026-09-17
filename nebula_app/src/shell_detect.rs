@@ -680,7 +680,7 @@ fi; printf '\033]1337;SetUserVar=pebrel_shell=%s\007\033]133;D;%s\007\033]7;file
         wslenv.push_str("PROMPT_COMMAND");
     }
     let report =
-        REPORT.replace("__PEBREL_CONNECTION_HOOK__", nebula_terminal::tty::CONNECTION_SHELL);
+        REPORT.replace("__PEBREL_CONNECTION_HOOK__", nebula_terminal::tty::connection_shell());
     vec![("PROMPT_COMMAND".to_owned(), report), ("WSLENV".to_owned(), wslenv)]
 }
 
@@ -997,7 +997,6 @@ mod tests {
         assert_eq!(launched.args(), &["-d".to_owned(), "Ubuntu".to_owned()]);
     }
 
-    #[cfg(windows)]
     #[test]
     fn wsl_cwd_report_preserves_the_refreshed_wslenv() {
         let additions = wsl_cwd_report_env(
@@ -1015,6 +1014,79 @@ mod tests {
         assert!(prompt_command.contains("]133;D;%s"));
         assert!(prompt_command.contains("]7;file://%s%s"));
         assert!(prompt_command.contains("]133;A"));
+        assert!(!prompt_command.contains('\r'));
+    }
+
+    #[test]
+    fn wsl_prompt_command_executes_repeatedly_without_checkout_carriage_returns() {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+
+        let environment = wsl_cwd_report_env("wsl.exe", &[], Some("PROMPT_COMMAND:KEEP/u"));
+        assert_eq!(environment[1].1, "PROMPT_COMMAND:KEEP/u");
+        let prompt = &environment[0].1;
+        let bash = std::env::var_os("NEBULA_BASH").unwrap_or_else(|| {
+            [r"C:\Program Files\Git\bin\bash.exe", r"C:\Program Files (x86)\Git\bin\bash.exe"]
+                .into_iter()
+                .find(|path| std::path::Path::new(path).is_file())
+                .unwrap_or("bash")
+                .into()
+        });
+        let run = |prompt: &str, user_function: &str| {
+            let user_check =
+                if user_function.is_empty() { "" } else { "ssh; test $? = 42 || exit 97" };
+            let mut child = Command::new(&bash)
+                .args(["--noprofile", "--norc", "-s"])
+                .env("BASH_ENV", "/dev/null")
+                .env("PROMPT_COMMAND", prompt)
+                .env_remove("__pebrel_shell_token")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("Bash is required for the shell injection regression");
+            let script = format!(
+                r#"{user_function}
+(exit 7); eval "$PROMPT_COMMAND" || exit 91
+typeset -f __pebrel_connection >/dev/null || exit 92
+typeset -f ssh >/dev/null || exit 93
+token=$__pebrel_shell_token
+test -n "$token" || exit 94
+(exit 23); eval "$PROMPT_COMMAND" || exit 95
+test "$token" = "$__pebrel_shell_token" || exit 96
+{user_check}
+"#
+            );
+            child.stdin.take().unwrap().write_all(script.as_bytes()).unwrap();
+            child.wait_with_output().unwrap()
+        };
+        // Git Bash accepts CRLF in eval; Unix Bash (including WSL) rejects it.
+        // Run the failing control on Unix and the fixed payload on every host.
+        #[cfg(unix)]
+        {
+            let broken = prompt.replace(
+                nebula_terminal::tty::connection_shell(),
+                &nebula_terminal::tty::connection_shell().replace('\n', "\r\n"),
+            );
+            let output = run(&broken, "");
+            assert!(!output.status.success(), "CRLF must reproduce the original parse failure");
+            assert!(String::from_utf8_lossy(&output.stderr).contains("syntax error"));
+        }
+
+        for user_function in ["", "ssh() { return 42; }"] {
+            let output = run(prompt, user_function);
+            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+            assert!(output.stderr.is_empty(), "{}", String::from_utf8_lossy(&output.stderr));
+            let stdout = String::from_utf8(output.stdout).unwrap();
+            for marker in
+                ["\x1b]133;D;7\x07", "\x1b]133;D;23\x07", "\x1b]7;file://", "\x1b]133;A\x07"]
+            {
+                assert_eq!(
+                    stdout.matches(marker).count(),
+                    if marker.contains("D;") { 1 } else { 2 }
+                );
+            }
+        }
     }
 
     #[test]

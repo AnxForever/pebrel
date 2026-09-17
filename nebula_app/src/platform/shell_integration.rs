@@ -36,7 +36,7 @@ fn prepare_unix(options: &mut tty::Options) -> std::io::Result<()> {
                 (".zshrc", include_str!("../../res/shell/zshrc")),
             ] {
                 let content = if name == ".zshrc" {
-                    format!("{content}\n{}", tty::CONNECTION_SHELL)
+                    format!("{content}\n{}", tty::connection_shell())
                 } else {
                     content.to_owned()
                 };
@@ -59,7 +59,7 @@ fn prepare_unix(options: &mut tty::Options) -> std::io::Result<()> {
             std::fs::create_dir_all(&root)?;
             let init = root.join("bashrc");
             let content =
-                format!("{}\n{}", include_str!("../../res/shell/bashrc"), tty::CONNECTION_SHELL);
+                format!("{}\n{}", include_str!("../../res/shell/bashrc"), tty::connection_shell());
             crate::atomic_file::write(&init, content.as_bytes())?;
             options.shell = Some(tty::Shell::new(
                 program,
