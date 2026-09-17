@@ -22,15 +22,15 @@ impl super::TerminalView {
 
 /// 屏幕推导出的状态变化要不要弹提示。
 ///
-/// `hooks` 表示 agent CLI 的 hook 是否在场。在场时 `TurnDone` 才是权威终态，
-/// 屏幕静默只是「迟迟没等到 hook」的兜底猜测——它可以照旧更新状态（侧栏蓝点
-/// 不受影响，状态赋值在调用方），但不该对用户宣称「回合完成」。
-///
-/// 2026-09-14：此前无条件对 `Working -> Done` 弹提示，而这条转换只要屏幕静默
-/// 5 拍（看门狗 1 Hz）就会发生。Claude 思考时、或跑一条不输出的长命令（编译等）
-/// 时终端本就没有输出，于是任务还在跑却反复弹「回合完成」。没有 hook 的客户端
-/// 屏幕仍是唯一证据，保持原样。
-pub(super) fn screen_notification(previous: AgentStatus, next: AgentStatus, hooks: bool) -> Option<bool> {
+/// `hooks` 表示当前 agent 会话是否已经收到 hook。有 hook 时，完成通知应等待
+/// `TurnDone`。看门狗连续识别到 Idle 界面也会把 Working / Blocked 降为 Done，
+/// 但界面可能在后台任务仍运行时显示 Idle，不能据此宣称回合完成。
+/// 这里仅控制通知；调用方仍保留屏幕状态自愈，无 hook 会话保留屏幕通知。
+pub(super) fn screen_notification(
+    previous: AgentStatus,
+    next: AgentStatus,
+    hooks: bool,
+) -> Option<bool> {
     match next {
         AgentStatus::Blocked if previous != AgentStatus::Blocked => Some(true),
         AgentStatus::Done if matches!(previous, AgentStatus::Working | AgentStatus::Blocked) => {
@@ -65,24 +65,38 @@ mod tests {
     #[test]
     fn screen_completion_and_attention_are_edges_not_idle_polling() {
         // 无 hook 时屏幕是唯一证据，「完成」照旧提示。
-        assert_eq!(screen_notification(AgentStatus::Working, AgentStatus::Done, false), Some(false));
-        assert_eq!(screen_notification(AgentStatus::Blocked, AgentStatus::Done, false), Some(false));
-        assert_eq!(screen_notification(AgentStatus::Working, AgentStatus::Blocked, false), Some(true));
-        assert_eq!(screen_notification(AgentStatus::Unknown, AgentStatus::Blocked, false), Some(true));
+        assert_eq!(
+            screen_notification(AgentStatus::Working, AgentStatus::Done, false),
+            Some(false)
+        );
+        assert_eq!(
+            screen_notification(AgentStatus::Blocked, AgentStatus::Done, false),
+            Some(false)
+        );
+        assert_eq!(
+            screen_notification(AgentStatus::Working, AgentStatus::Blocked, false),
+            Some(true)
+        );
+        assert_eq!(
+            screen_notification(AgentStatus::Unknown, AgentStatus::Blocked, false),
+            Some(true)
+        );
         assert_eq!(screen_notification(AgentStatus::Done, AgentStatus::Done, false), None);
         assert_eq!(screen_notification(AgentStatus::Blocked, AgentStatus::Blocked, false), None);
         assert_eq!(screen_notification(AgentStatus::Unknown, AgentStatus::Idle, false), None);
         assert_eq!(screen_notification(AgentStatus::Idle, AgentStatus::Idle, false), None);
     }
 
-    /// hook 在场时 `TurnDone` 才是权威终态：屏幕静默推出的 `Done` 不弹提示，
-    /// 否则 Claude 思考或长命令运行期间会反复误报「回合完成」。
+    /// hook 在场时，屏幕推断的 Done 不能触发完成通知。
     #[test]
     fn screen_inferred_completion_stays_silent_while_hooks_are_live() {
         assert_eq!(screen_notification(AgentStatus::Working, AgentStatus::Done, true), None);
         assert_eq!(screen_notification(AgentStatus::Blocked, AgentStatus::Done, true), None);
         // 等输入是真事件，与完成无关，不受 hook 影响。
-        assert_eq!(screen_notification(AgentStatus::Working, AgentStatus::Blocked, true), Some(true));
+        assert_eq!(
+            screen_notification(AgentStatus::Working, AgentStatus::Blocked, true),
+            Some(true)
+        );
     }
 
     #[test]

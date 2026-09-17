@@ -51,3 +51,48 @@ pub(crate) fn hidden_command_with(command: &mut Command, extra_flags: u32) -> &m
     let _ = extra_flags;
     command
 }
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+    use std::io::Write as _;
+    use std::process::Stdio;
+
+    #[test]
+    fn hidden_console_children_keep_pipes_and_exit_status() {
+        // Query the console from a real console-subsystem executable. The GPUI
+        // test executable itself is a GUI process and cannot expose this bug.
+        let script = r#"
+Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices;
+public static class ConsoleProbe {
+    [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();
+}'
+if ([ConsoleProbe]::GetConsoleWindow() -ne [IntPtr]::Zero) { exit 91 }
+[Console]::Out.Write([Console]::In.ReadLine())
+[Console]::Error.Write('probe-stderr')
+exit 7
+"#;
+        let system = std::env::var_os("SystemRoot").expect("Windows system directory");
+        let powershell =
+            std::path::Path::new(&system).join("System32/WindowsPowerShell/v1.0/powershell.exe");
+        for extra_flags in [0, windows_sys::Win32::System::Threading::CREATE_NEW_PROCESS_GROUP] {
+            let mut command = Command::new(&powershell);
+            command
+                .args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+            if extra_flags == 0 {
+                hidden_command(&mut command);
+            } else {
+                hidden_command_with(&mut command, extra_flags);
+            }
+            let mut child = command.spawn().expect("start console probe");
+            child.stdin.take().unwrap().write_all(b"probe-stdin\n").unwrap();
+            let output = child.wait_with_output().expect("wait for console probe");
+            assert_eq!(output.status.code(), Some(7), "{output:?}");
+            assert_eq!(output.stdout, b"probe-stdin");
+            assert_eq!(output.stderr, b"probe-stderr");
+        }
+    }
+}

@@ -932,9 +932,8 @@ fn count_background_tasks(value: &Value, active: &mut u32, total: &mut u32) {
 /// `stopped` / `cancelled` / `aborted` / `exited`。这里取其中的终态，再补上同族词
 /// （`done` / `finished` / `error` / `canceled` …）。
 ///
-/// 判反的代价不对称：漏掉一个终态，`active` 会永远大于 0，pane 停在「工作中」、
-/// 完成通知不再弹，`runtime_api` 那边连 `agent.delegate` 的完成回调都不会触发——
-/// 比早弹一条通知更难发现。多留的词最多只是让一笔刚结束的活儿多算一拍。
+/// 漏掉终态会让 pane 一直等待后台任务；误把运行态加入这张表则会提前通知完成。
+/// 缺失或未知状态按仍在运行处理，避免 provider 扩展类型时恢复提前完成的问题。
 const TERMINAL_TASK_STATUSES: &[&str] = &[
     "completed",
     "complete",
@@ -977,9 +976,7 @@ fn task_is_in_flight(task: &serde_json::Map<String, Value>) -> bool {
         return false;
     }
     match task.get("status").and_then(Value::as_str) {
-        Some(status) => {
-            !TERMINAL_TASK_STATUSES.contains(&status.to_ascii_lowercase().as_str())
-        },
+        Some(status) => !TERMINAL_TASK_STATUSES.contains(&status.to_ascii_lowercase().as_str()),
         None => true,
     }
 }
@@ -1307,6 +1304,24 @@ mod remote_tests {
         assert_eq!(event.background_tasks.unwrap().total, 0);
     }
 
+    #[test]
+    fn pending_and_unknown_background_work_prevent_premature_completion() {
+        let payload = serde_json::json!({
+            "hook_event_name": "Stop",
+            "background_tasks": { "entries": [
+                { "type": "local_bash", "status": "pending" },
+                { "type": "future_task", "status": "waiting_for_resource" },
+                { "type": "monitor" },
+                { "type": "subagent", "status": "COMPLETED" }
+            ] }
+        });
+        let raw = format!("nebula-hook/1 source=claude pane=3\n{payload}");
+        let event = parse_remote_envelope(raw.as_bytes(), Some(3)).unwrap();
+        assert_eq!(event.kind, AiHookKind::TurnDone);
+        assert_eq!(event.active_background_tasks(), 3);
+        assert_eq!(event.background_tasks.unwrap().total, 4);
+    }
+
     /// 闲置的 `in_process_teammate` 会一直挂 `status: "running"`
     /// （anthropics/claude-code#85955），只有它自己的 `isIdle` 能说明它没在干活。
     /// 少了这道判据，pane 会永远停在「还在跑」，完成通知再也弹不出来。
@@ -1323,8 +1338,7 @@ mod remote_tests {
     /// `agent.delegate` 的完成回调也不会触发，比早弹一条更难发现。
     #[test]
     fn finished_background_tasks_do_not_hold_the_turn_open() {
-        for status in ["completed", "success", "exited", "failed", "killed", "cancelled", "idle"]
-        {
+        for status in ["completed", "success", "exited", "failed", "killed", "cancelled", "idle"] {
             let payload = serde_json::json!({
                 "session_id": "s",
                 "hook_event_name": "Stop",
