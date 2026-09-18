@@ -949,6 +949,14 @@ impl TerminalView {
                         self.agent_status_rule =
                             Some(format!("hook.background_tasks.active={active}"));
                     },
+                    AiHookKind::TurnDone
+                        if event.outcome.is_some_and(|outcome| {
+                            outcome != crate::ai_hook::AiTurnOutcome::Success
+                        }) =>
+                    {
+                        self.agent_status = AgentStatus::Idle;
+                        self.agent_turn_active = false;
+                    },
                     AiHookKind::TurnDone | AiHookKind::NeedsAttention => {
                         let screen_asks =
                             event.kind == AiHookKind::TurnDone && self.screen_tail_asks();
@@ -979,14 +987,10 @@ impl TerminalView {
                 }));
             }
         } else if from_primary_agent
-            && event.kind == AiHookKind::TurnDone
-            && matches!(self.agent_status, AgentStatus::Done | AgentStatus::Blocked)
+            && let Some(notification) = event
+                .turn_notification(super::ui_language(), self.agent_status == AgentStatus::Blocked)
         {
-            cx.emit(TerminalViewEvent::Notification(crate::notify::Notification::AiTurn {
-                program: event.source.clone(),
-                message: event.message.clone(),
-                attention: self.agent_status == AgentStatus::Blocked,
-            }));
+            cx.emit(TerminalViewEvent::Notification(notification));
         }
         cx.emit(TerminalViewEvent::TitleChanged);
         cx.notify();

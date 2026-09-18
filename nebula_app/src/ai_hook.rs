@@ -332,6 +332,7 @@ pub struct AiHookEvent {
     /// AI CLI identity, used as the toast title.
     pub source: String,
     pub kind: AiHookKind,
+    pub outcome: Option<AiTurnOutcome>,
     /// Human text when the event carries one (claude's notification message,
     /// codex's last assistant message).
     pub message: Option<String>,
@@ -367,6 +368,14 @@ pub struct AiHookEvent {
     pub permission_mode: Option<AiPermissionMode>,
     pub background_tasks: Option<AiBackgroundTasks>,
     pub attention: Option<AttentionContext>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AiTurnOutcome {
+    Success,
+    Failed,
+    Cancelled,
+    Unknown,
 }
 
 impl AiHookEvent {
@@ -767,6 +776,16 @@ fn parse_envelope(bytes: &[u8]) -> Option<AiHookEvent> {
         answer,
         answer_cwd,
         pane,
+        outcome: if source == "pi" && kind == AiHookKind::TurnDone {
+            payload.get("outcome").map(|value| match value.as_str() {
+                Some("success") => AiTurnOutcome::Success,
+                Some("failed") => AiTurnOutcome::Failed,
+                Some("cancelled") => AiTurnOutcome::Cancelled,
+                _ => AiTurnOutcome::Unknown,
+            })
+        } else {
+            None
+        },
         source,
         kind,
         message,

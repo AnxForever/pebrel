@@ -106,6 +106,31 @@ pub enum Notification {
     AiTurn { program: String, message: Option<String>, attention: bool },
 }
 
+impl crate::ai_hook::AiHookEvent {
+    pub(crate) fn turn_notification(
+        &self,
+        language: crate::display::UiLanguage,
+        attention: bool,
+    ) -> Option<Notification> {
+        use crate::ai_hook::{AiHookKind, AiTurnOutcome};
+        if self.kind != AiHookKind::TurnDone || self.active_background_tasks() > 0 {
+            return None;
+        }
+        let message = match self.outcome {
+            Some(AiTurnOutcome::Cancelled | AiTurnOutcome::Unknown) => return None,
+            Some(AiTurnOutcome::Failed) => {
+                Some(language.text(crate::i18n::Message::NotificationsTurnFailed).to_owned())
+            },
+            Some(AiTurnOutcome::Success) | None => self.message.clone(),
+        };
+        Some(Notification::AiTurn {
+            program: self.source.clone(),
+            message,
+            attention: attention && self.outcome != Some(AiTurnOutcome::Failed),
+        })
+    }
+}
+
 /// Longest notification body any shell may render.
 ///
 /// A toast/banner is a glance layer, not a reader. Codex's turn-complete
@@ -308,6 +333,31 @@ fn spawn_toast(title: String, body: String, activation: Option<ToastActivation>)
 #[cfg(test)]
 mod delivery_tests {
     use super::*;
+
+    #[test]
+    fn pi_outcomes_do_not_turn_failure_or_cancellation_into_success() {
+        for (outcome, expected) in [
+            (Some("failed"), Some("本轮失败。")),
+            (Some("cancelled"), None),
+            (Some("unknown"), None),
+            (Some("future"), None),
+        ] {
+            let payload = serde_json::json!({"kind": "done", "outcome": outcome});
+            let wire = format!("nebula-hook/1 source=pi\n{payload}");
+            let event = crate::ai_hook::parse_remote_envelope(wire.as_bytes(), Some(1)).unwrap();
+            let notification = event.turn_notification(crate::display::UiLanguage::ZhCn, false);
+            assert_eq!(notification.map(|value| value.toast_text().1).as_deref(), expected);
+        }
+        for outcome in [None, Some("success")] {
+            let mut payload = serde_json::json!({"kind": "done"});
+            if let Some(outcome) = outcome {
+                payload["outcome"] = outcome.into();
+            }
+            let wire = format!("nebula-hook/1 source=pi\n{payload}");
+            let event = crate::ai_hook::parse_remote_envelope(wire.as_bytes(), Some(1)).unwrap();
+            assert!(event.turn_notification(crate::display::UiLanguage::EnUs, false).is_some());
+        }
+    }
 
     #[test]
     fn every_registered_ai_is_recognized_for_bell_text_and_command_events() {
