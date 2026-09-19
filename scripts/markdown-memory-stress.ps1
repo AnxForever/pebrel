@@ -3,8 +3,9 @@
 Exercise a dedicated Windows Markdown window and record process/GPU memory.
 .DESCRIPTION
 Generates original formulas, tables, code, lists and PNGs. HTTP images are served
-only from generated assets on loopback. Samples working set and private bytes
-separately; neither is added to GPU counters. No working-set trimming is used.
+only from generated assets on loopback. Samples private working set, total
+working set and private commit separately; none is added to GPU counters.
+No working-set trimming is used.
 The default edit coordinates reproduce the fixture at 144 DPI and a 1938x1103
 window. They scale with window DPI. Inspect first-cycle screenshots when changing
 fonts, UI layout or the fixture; a click count alone does not prove editing.
@@ -110,7 +111,15 @@ if ($Mode -eq 'sample') {
             } catch { $gpuAvailable = $false; Append-Json 'limitations.jsonl' @{gpu=$_.Exception.Message} }
         }
         $gpuTimer.Stop()
-        # GPU counter discovery can be slow. Read the process and phase again
+        $privateWorkingSet = $null
+        try {
+            $resident = @(Get-CimInstance Win32_PerfFormattedData_PerfProc_Process -Filter "IDProcess=$OwnerId" -ErrorAction Stop)
+            if ($resident.Count -ne 1 -or $null -eq $resident[0].WorkingSetPrivate) {
+                throw 'The private working-set counter is missing or ambiguous.'
+            }
+            $privateWorkingSet = [long]$resident[0].WorkingSetPrivate
+        } catch { Append-Json 'limitations.jsonl' @{privateWorkingSet=$_.Exception.Message} }
+        # Counter discovery can be slow. Read the process and phase again
         # afterwards so a delayed query cannot label a new phase as an old one.
         $target.Refresh()
         $phase = if (Test-Path $phaseFile) { (Get-Content $phaseFile -Raw).Trim() } else { 'startup' }
@@ -118,6 +127,7 @@ if ($Mode -eq 'sample') {
         [pscustomobject]@{
             time=(Get-Date).ToString('o');pid=$OwnerId;seconds=$timer.Elapsed.TotalSeconds;phase=$phase
             privateBytes=$target.PrivateMemorySize64;workingSetBytes=$target.WorkingSet64
+            privateWorkingSetBytes=$privateWorkingSet
             peakWorkingSetBytes=$target.PeakWorkingSet64;cpuSeconds=$target.TotalProcessorTime.TotalSeconds
             handles=$target.HandleCount;threads=$target.Threads.Count
             gpuDedicatedBytes=$dedicated;gpuSharedBytes=$shared;valid=(-not $panic)
@@ -346,7 +356,7 @@ fn item_INDEX() -> usize {
         scrollSteps=$ScrollSteps;stepMilliseconds=$StepMilliseconds;profile=$BuildProfile
         fixtureSha256=(Get-FileHash $document -Algorithm SHA256).Hash
         workingSetLimitMiB=$WorkingSetLimitMiB;terminalLimitMiB=$TerminalLimitMiB;terminalOnly=[bool]$TerminalOnly
-        measurement='Separate process working set/private bytes/GPU counters; HTTP loopback, no WAN latency claim.'
+        measurement='Separate private working set, total working set, private commit and GPU counters; HTTP loopback, no WAN latency claim.'
     }
     if ($GenerateOnly) { $success = $true; Write-Utf8 (Join-Path $OutputDirectory 'manifest.json') ($manifest | ConvertTo-Json -Depth 6); return }
     $Executable = (Resolve-Path -LiteralPath $Executable).Path
@@ -470,6 +480,8 @@ fn item_INDEX() -> usize {
     $phases = @($rows | Group-Object phase | ForEach-Object {
         $working = @($_.Group | ForEach-Object { [double]$_.workingSetBytes/1MB } | Sort-Object)
         $private = @($_.Group | ForEach-Object { [double]$_.privateBytes/1MB } | Sort-Object)
+        $privateWorking = @($_.Group | Where-Object privateWorkingSetBytes -ne '' | ForEach-Object { [double]$_.privateWorkingSetBytes/1MB } | Sort-Object)
+        $privateWorkingComplete = $privateWorking.Count -eq $_.Group.Count
         $dedicated = @($_.Group | Where-Object gpuDedicatedBytes -ne '' | ForEach-Object { [double]$_.gpuDedicatedBytes/1MB })
         $shared = @($_.Group | Where-Object gpuSharedBytes -ne '' | ForEach-Object { [double]$_.gpuSharedBytes/1MB })
         $limit = if ($TerminalOnly -or $_.Name -in @('markdown-tab-inactive','markdown-closed')) { $TerminalLimitMiB } else { $WorkingSetLimitMiB }
@@ -477,6 +489,10 @@ fn item_INDEX() -> usize {
             phase=$_.Name;samples=$working.Count
             workingMedianMiB=(Median $working);workingMaxMiB=$working[-1]
             privateMedianMiB=(Median $private);privateMaxMiB=$private[-1]
+            privateWorkingMedianMiB=(Median $privateWorking)
+            privateWorkingMaxMiB=if ($privateWorking.Count) { $privateWorking[-1] } else { $null }
+            privateWorkingSetComplete=$privateWorkingComplete
+            privateWorkingSetWithinTarget=($privateWorkingComplete -and $privateWorking[-1] -le $limit)
             gpuDedicatedMedianMiB=(Median $dedicated);gpuSharedMedianMiB=(Median $shared)
             processLimitMiB=$limit;bothProcessMetricsWithinTarget=($working[-1] -le $limit -and $private[-1] -le $limit)
         }
@@ -484,6 +500,8 @@ fn item_INDEX() -> usize {
     $budget = if ($TerminalOnly) { $TerminalLimitMiB } else { $WorkingSetLimitMiB }
     $overBudget = @($rows | Where-Object { [double]$_.workingSetBytes/1MB -gt $budget })
     $processTargetsPassed = $phases.Count -gt 0 -and @($phases | Where-Object bothProcessMetricsWithinTarget -eq $false).Count -eq 0
+    $privateWorkingComplete = $phases.Count -gt 0 -and @($phases | Where-Object privateWorkingSetComplete -eq $false).Count -eq 0
+    $privateWorkingTargetsPassed = $phases.Count -gt 0 -and @($phases | Where-Object privateWorkingSetWithinTarget -eq $false).Count -eq 0
     $requiredPhases = if ($TerminalOnly) { @('terminal-never-opened-markdown') } else {
         @('markdown-initial','markdown-tab-inactive','markdown-resumed','markdown-closed') + @(for ($round = 1; $round -le $Rounds; $round++) { "round-$round-bottom"; "round-$round-top" })
     }
@@ -493,7 +511,9 @@ fn item_INDEX() -> usize {
         completed=$success;samplingComplete=$samplingComplete;phases=$phases
         phaseCoverageComplete=$phaseCoverageComplete;missingPhases=$missingPhases
         workingSetLimitMiB=$budget;workingSetBudgetPassed=($success -and $samplingComplete -and $phaseCoverageComplete -and $rows.Count -gt 0 -and $overBudget.Count -eq 0)
-        processMemoryBudgetPassed=($success -and $samplingComplete -and $phaseCoverageComplete -and $processTargetsPassed)
+        privateWorkingSetSamplingComplete=$privateWorkingComplete
+        privateWorkingSetBudgetPassed=($success -and $samplingComplete -and $phaseCoverageComplete -and $privateWorkingTargetsPassed)
+        processMemoryBudgetPassed=($success -and $samplingComplete -and $phaseCoverageComplete -and $processTargetsPassed -and $privateWorkingTargetsPassed)
         requiresVisualCoverageReview=$true;limitsAreTargetsNotGuarantees=$true
     } | ConvertTo-Json -Depth 6)
     Write-Output "Evidence: $OutputDirectory"
