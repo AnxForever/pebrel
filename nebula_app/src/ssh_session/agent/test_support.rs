@@ -4,14 +4,14 @@ use std::future::Future;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use russh::keys::signature::Signer as _;
-use russh::keys::ssh_key::encoding::Encode as _;
-use russh::keys::ssh_key::{Algorithm, HashAlg, PrivateKey, Signature};
+use russh::keys::ssh_key::{Algorithm, HashAlg};
 use russh::server::{self, Auth};
-use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 use tokio::net::{TcpListener, TcpStream};
 
 use super::*;
+pub(super) use crate::platform::ssh_agent::test_support::{
+    Agent, AgentBehavior, Identity, check, key,
+};
 use crate::ssh_profiles::{SshAuthMode, SshProfileAuth};
 use crate::ssh_session::route::{ResolvedRoute, RouteTransport};
 use crate::ssh_session::{NoopSshEventHost, SshTestRequest};
@@ -30,162 +30,6 @@ pub(super) fn connect(endpoint: Endpoint, destination: &str) -> Result<DynamicAg
     FACTORY
         .try_with(|factory| factory(endpoint, destination))
         .unwrap_or_else(|_| Err("no agent installed in this test scope".into()))
-}
-
-pub(super) fn check(future: impl Future<Output = ()>) {
-    tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
-        tokio::time::timeout(Duration::from_secs(40), future).await.expect("bounded SSH test");
-    });
-}
-
-pub(super) fn key() -> Arc<PrivateKey> {
-    Arc::new(PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap())
-}
-
-#[derive(Clone)]
-pub(super) struct Identity {
-    pub advertised: AgentIdentity,
-    pub key: Arc<PrivateKey>,
-}
-
-impl Identity {
-    pub fn plain(key: Arc<PrivateKey>) -> Self {
-        Self { advertised: key.public_key().clone().into(), key }
-    }
-
-    pub fn certificate(key: Arc<PrivateKey>) -> Self {
-        let ca = self::key();
-        let mut builder = russh::keys::ssh_key::certificate::Builder::new_with_random_nonce(
-            &mut rand::rng(),
-            key.public_key(),
-            0,
-            u64::MAX,
-        )
-        .unwrap();
-        builder.cert_type(russh::keys::ssh_key::certificate::CertType::User).unwrap();
-        builder.valid_principal("fixture-user").unwrap();
-        let certificate = builder.sign(ca.as_ref()).unwrap();
-        Self { advertised: certificate.into(), key }
-    }
-}
-
-#[derive(Clone, Copy, Default)]
-pub(super) enum AgentBehavior {
-    #[default]
-    Normal,
-    HangIdentities,
-    RefuseSignature,
-    HangSignature,
-    DisconnectSignature,
-}
-
-#[derive(Default)]
-pub(super) struct AgentStats {
-    pub queries: AtomicUsize,
-    pub signs: AtomicUsize,
-    pub flags: Mutex<Vec<u32>>,
-}
-
-#[derive(Clone, Default)]
-pub(super) struct Agent {
-    pub identities: Vec<Identity>,
-    pub behavior: AgentBehavior,
-    pub stats: Arc<AgentStats>,
-}
-
-impl Agent {
-    pub fn new(identities: Vec<Identity>) -> Self {
-        Self { identities, ..Default::default() }
-    }
-
-    pub fn connect(&self) -> DynamicAgent {
-        let (client, server) = tokio::io::duplex(256 * 1024);
-        tokio::spawn(self.clone().serve(server));
-        AgentClient::connect(client).dynamic()
-    }
-
-    pub async fn serve(self, mut stream: impl AsyncRead + AsyncWrite + Unpin) {
-        while let Ok(length) = stream.read_u32().await {
-            assert!(length <= 256 * 1024);
-            let mut frame = vec![0; length as usize];
-            if stream.read_exact(&mut frame).await.is_err() {
-                return;
-            }
-            let mut response = Vec::new();
-            match frame[0] {
-                11 => {
-                    self.stats.queries.fetch_add(1, Ordering::SeqCst);
-                    if matches!(self.behavior, AgentBehavior::HangIdentities) {
-                        std::future::pending::<()>().await;
-                    }
-                    response.push(12);
-                    response.extend_from_slice(&(self.identities.len() as u32).to_be_bytes());
-                    for identity in &self.identities {
-                        put_string(&mut response, &identity_blob(&identity.advertised).unwrap());
-                        put_string(&mut response, b"fixture");
-                    }
-                },
-                13 => {
-                    self.stats.signs.fetch_add(1, Ordering::SeqCst);
-                    match self.behavior {
-                        AgentBehavior::RefuseSignature => response.push(5),
-                        AgentBehavior::DisconnectSignature => return,
-                        AgentBehavior::HangSignature => std::future::pending::<()>().await,
-                        _ => {
-                            let mut request = &frame[1..];
-                            let blob = take_string(&mut request);
-                            let data = take_string(&mut request);
-                            let flags = u32::from_be_bytes(request.try_into().unwrap());
-                            self.stats.flags.lock().unwrap().push(flags);
-                            let key = &self
-                                .identities
-                                .iter()
-                                .find(|identity| {
-                                    identity_blob(&identity.advertised).unwrap() == blob
-                                })
-                                .expect("only advertised identities may be signed")
-                                .key;
-                            let signature: Signature = if let Some(rsa) = key.key_data().rsa() {
-                                let hash = match flags {
-                                    2 => Some(HashAlg::Sha256),
-                                    4 => Some(HashAlg::Sha512),
-                                    0 => None,
-                                    _ => panic!("invalid RSA flags"),
-                                };
-                                (rsa, hash).try_sign(data).unwrap()
-                            } else {
-                                assert_eq!(flags, 0);
-                                key.try_sign(data).unwrap()
-                            };
-                            let mut encoded = Vec::new();
-                            signature.encode(&mut encoded).unwrap();
-                            response.push(14);
-                            put_string(&mut response, &encoded);
-                        },
-                    }
-                },
-                _ => panic!("unexpected agent operation"),
-            }
-            if stream.write_u32(response.len() as u32).await.is_err()
-                || stream.write_all(&response).await.is_err()
-                || stream.flush().await.is_err()
-            {
-                return;
-            }
-        }
-    }
-}
-
-fn put_string(frame: &mut Vec<u8>, bytes: &[u8]) {
-    frame.extend_from_slice(&(bytes.len() as u32).to_be_bytes());
-    frame.extend_from_slice(bytes);
-}
-
-fn take_string<'a>(frame: &mut &'a [u8]) -> &'a [u8] {
-    let length = u32::from_be_bytes(frame[..4].try_into().unwrap()) as usize;
-    let value = &frame[4..4 + length];
-    *frame = &frame[4 + length..];
-    value
 }
 
 #[derive(Clone, Default)]
@@ -390,7 +234,7 @@ impl Fixture {
         crate::ssh_session::test_connect(&self.route, &self.request(password)).await
     }
 
-    pub async fn attempt(&self) -> Result<Attempt, SessionError> {
+    pub async fn attempt(&self, endpoints: &[Endpoint]) -> Result<Attempt, SessionError> {
         let mut transport = crate::ssh_session::open_transport(
             &self.route,
             Arc::new(russh::client::Config::default()),
@@ -399,10 +243,11 @@ impl Fixture {
         )
         .await?;
         transport.session.authenticate_none(&self.route.destination.user).await?;
-        authenticate(
+        authenticate_with_endpoints(
             &mut transport.session,
             &self.route.destination,
             &self.route.profile.private_keys,
+            endpoints,
         )
         .await
     }

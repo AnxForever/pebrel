@@ -198,7 +198,6 @@ fn ssh_bell_does_not_report_a_blocked_or_finished_command(cx: &mut TestAppContex
     });
 }
 
-#[cfg(windows)]
 #[gpui::test]
 fn claude_shift_enter_reaches_pty_without_committing_shell_history(cx: &mut TestAppContext) {
     let (view, window, receiver) = open(cx);

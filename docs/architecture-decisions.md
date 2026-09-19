@@ -870,8 +870,11 @@ settings files.
   the selected authentication mode. Password mode retains password/PAM only,
   PublicKey retains disk keys only, and KeyboardInteractive retains that method
   only. The legacy profile migration remains unchanged.
-- **Agent boundary:** `ssh_session::agent` owns platform discovery, public identity
-  selectors, signing and structured results. Windows tries the standard OpenSSH
+- **Agent boundary:** `ssh_session::agent` owns the total discovery budget, public
+  identity selectors, signing and structured results. `platform::ssh_agent` owns
+  native endpoint selection, connection and bounded identity enumeration. Its
+  adapter returns protocol streams and identities without depending on the SSH
+  policy module. Windows tries the standard OpenSSH
   pipe and then Pageant; Unix uses `SSH_AUTH_SOCK`. Platform methods are compiled
   only for their target, with no endpoints on other targets. Existing russh
   support supplies the protocol, dynamic stream, public keys, certificates and

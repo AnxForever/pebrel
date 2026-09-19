@@ -10,34 +10,15 @@ use std::time::Duration;
 use russh::MethodKind;
 use russh::client::AuthResult;
 use russh::keys::agent::AgentIdentity;
-use russh::keys::agent::client::{AgentClient, AgentStream};
 use russh::keys::ssh_key::{Certificate, PublicKey};
 use tokio::io::AsyncReadExt as _;
 
 use super::{ClientSession, SessionError, SshDestination, lifecycle};
-
-type DynamicAgent = AgentClient<Box<dyn AgentStream + Send + Unpin>>;
+use crate::platform::ssh_agent::{self, Connection as DynamicAgent, ENDPOINTS, Endpoint};
 const DISCOVERY_TOTAL: Duration = Duration::from_secs(3);
 const DISCOVERY_ENDPOINT: Duration = Duration::from_millis(1_500);
 const SELECTOR_BUDGET: Duration = Duration::from_secs(1);
 const PUBLIC_KEY_BYTES: u64 = 64 * 1024;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum Endpoint {
-    #[cfg(windows)]
-    OpenSsh,
-    #[cfg(windows)]
-    Pageant,
-    #[cfg(unix)]
-    Environment,
-}
-
-#[cfg(windows)]
-const ENDPOINTS: &[Endpoint] = &[Endpoint::OpenSsh, Endpoint::Pageant];
-#[cfg(unix)]
-const ENDPOINTS: &[Endpoint] = &[Endpoint::Environment];
-#[cfg(not(any(windows, unix)))]
-const ENDPOINTS: &[Endpoint] = &[];
 
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Attempt {
@@ -56,6 +37,15 @@ pub(super) async fn authenticate(
     destination: &SshDestination,
     explicit_keys: &[PathBuf],
 ) -> Result<Attempt, SessionError> {
+    authenticate_with_endpoints(session, destination, explicit_keys, ENDPOINTS).await
+}
+
+async fn authenticate_with_endpoints(
+    session: &mut ClientSession,
+    destination: &SshDestination,
+    explicit_keys: &[PathBuf],
+    endpoints: &[Endpoint],
+) -> Result<Attempt, SessionError> {
     let preferred = tokio::time::timeout(
         SELECTOR_BUDGET,
         preferred_keys(explicit_keys.iter().chain(&destination.identity_files)),
@@ -68,7 +58,7 @@ pub(super) async fn authenticate(
     let mut reachable = false;
     let mut offered = HashSet::new();
 
-    for &endpoint in ENDPOINTS {
+    for &endpoint in endpoints {
         if remaining.is_zero() {
             break;
         }
@@ -152,20 +142,7 @@ async fn discover(
     destination: &str,
     budget: Duration,
 ) -> Result<(DynamicAgent, Vec<AgentIdentity>), SessionError> {
-    discover_connection(connect(endpoint, destination), budget).await
-}
-
-async fn discover_connection(
-    connection: impl std::future::Future<Output = Result<DynamicAgent, SessionError>>,
-    budget: Duration,
-) -> Result<(DynamicAgent, Vec<AgentIdentity>), SessionError> {
-    tokio::time::timeout(budget, async {
-        let mut agent = connection.await?;
-        let identities = agent.request_identities().await?;
-        Ok((agent, identities))
-    })
-    .await
-    .map_err(|_| "SSH agent discovery timed out")?
+    ssh_agent::discover_connection(connect(endpoint, destination), budget).await
 }
 
 async fn connect(endpoint: Endpoint, _destination: &str) -> Result<DynamicAgent, SessionError> {
@@ -178,24 +155,8 @@ async fn connect(endpoint: Endpoint, _destination: &str) -> Result<DynamicAgent,
     }
     #[cfg(not(test))]
     {
-        connect_system(endpoint).await
+        ssh_agent::connect(endpoint).await
     }
-}
-
-async fn connect_system(endpoint: Endpoint) -> Result<DynamicAgent, SessionError> {
-    match endpoint {
-        #[cfg(windows)]
-        Endpoint::OpenSsh => connect_pipe(r"\\.\pipe\openssh-ssh-agent").await,
-        #[cfg(windows)]
-        Endpoint::Pageant => Ok(AgentClient::connect_pageant().await?.dynamic()),
-        #[cfg(unix)]
-        Endpoint::Environment => Ok(AgentClient::connect_env().await?.dynamic()),
-    }
-}
-
-#[cfg(windows)]
-async fn connect_pipe(path: impl AsRef<std::ffi::OsStr>) -> Result<DynamicAgent, SessionError> {
-    Ok(AgentClient::connect_named_pipe(path).await?.dynamic())
 }
 
 async fn preferred_keys<'a>(paths: impl Iterator<Item = &'a PathBuf>) -> Vec<PublicKey> {
@@ -304,8 +265,6 @@ pub(super) fn with_diagnostic(message: String, attempt: Option<&Attempt>) -> Str
     format!("{message} ({detail})")
 }
 
-#[cfg(test)]
-mod native_tests;
 #[cfg(test)]
 mod test_support;
 #[cfg(test)]

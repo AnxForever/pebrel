@@ -795,7 +795,6 @@ mod tests {
         }
     }
 
-    #[cfg(windows)]
     #[test]
     fn claude_newline_fallback_preserves_codex_and_negotiated_protocols() {
         let key = Keystroke::parse("shift-enter").unwrap();

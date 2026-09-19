@@ -20,7 +20,7 @@ fn named_pipe_adapter_enumerates_identities_and_bounds_a_busy_pipe() {
             agent.serve(server).await;
         });
         let (connection, identities) =
-            discover_connection(connect_pipe(&path), DISCOVERY_ENDPOINT).await.unwrap();
+            discover_connection(connect_pipe(&path), Duration::from_secs(2)).await.unwrap();
         assert_eq!(identities.len(), 1);
         assert_eq!(identities[0].public_key().key_data(), identity.public_key().key_data());
 
@@ -44,14 +44,14 @@ fn named_pipe_adapter_enumerates_identities_and_bounds_a_busy_pipe() {
 fn environment_adapter_uses_only_the_child_process_socket() {
     const CHILD: &str = "PEBREL_TEST_SSH_AGENT_CHILD";
     const TEST: &str =
-        "ssh_session::agent::native_tests::environment_adapter_uses_only_the_child_process_socket";
+        "platform::ssh_agent::tests::environment_adapter_uses_only_the_child_process_socket";
 
     // The child receives a private environment before it starts any threads.
     // No unsafe process-global set_var can affect concurrent credential tests.
     if std::env::var_os(CHILD).is_some() {
         check(async {
             let (_, identities) =
-                discover_connection(connect_system(Endpoint::Environment), DISCOVERY_ENDPOINT)
+                discover_connection(connect(Endpoint::Environment), Duration::from_secs(2))
                     .await
                     .unwrap();
             assert_eq!(identities.len(), 1);
@@ -82,5 +82,24 @@ fn environment_adapter_uses_only_the_child_process_socket() {
             String::from_utf8_lossy(&output.stderr)
         );
         service.await.unwrap();
+    });
+}
+
+#[test]
+fn candidates_are_platform_specific_and_unsupported_endpoints_fail_explicitly() {
+    check(async {
+        #[cfg(windows)]
+        {
+            assert_eq!(ENDPOINTS, &[Endpoint::OpenSsh, Endpoint::Pageant]);
+            assert!(connect(Endpoint::Environment).await.is_err());
+        }
+        #[cfg(unix)]
+        {
+            assert_eq!(ENDPOINTS, &[Endpoint::Environment]);
+            assert!(connect(Endpoint::OpenSsh).await.is_err());
+            assert!(connect(Endpoint::Pageant).await.is_err());
+        }
+        #[cfg(not(any(windows, unix)))]
+        assert!(ENDPOINTS.is_empty());
     });
 }

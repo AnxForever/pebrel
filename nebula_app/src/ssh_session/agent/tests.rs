@@ -17,12 +17,6 @@ fn automatic_authentication_always_contains_the_agent_step() {
             crate::ssh_session::AuthMethod::PromptPassword,
         ]
     );
-    #[cfg(windows)]
-    assert_eq!(ENDPOINTS, &[Endpoint::OpenSsh, Endpoint::Pageant]);
-    #[cfg(unix)]
-    assert_eq!(ENDPOINTS, &[Endpoint::Environment]);
-    #[cfg(not(any(windows, unix)))]
-    assert!(ENDPOINTS.is_empty());
 }
 
 #[test]
@@ -389,7 +383,7 @@ fn discovery_results_distinguish_unavailable_empty_and_rejected() {
                     }
                     agent.as_ref().map(Agent::connect).ok_or_else(|| "unavailable".into())
                 },
-                fixture.attempt(),
+                fixture.attempt(ENDPOINTS),
             )
             .await
             .unwrap();
@@ -491,9 +485,8 @@ fn selector_order_is_explicit_then_resolved_and_other_identities_stay_stable() {
     });
 }
 
-#[cfg(windows)]
 #[test]
-fn windows_fallback_order_and_duplicate_identity_suppression() {
+fn endpoint_fallback_order_and_duplicate_identity_suppression() {
     check(async {
         for first in [None, Some(Agent::default()), Some(Agent::new(vec![Identity::plain(key())]))]
         {
@@ -506,7 +499,7 @@ fn windows_fallback_order_and_duplicate_identity_suppression() {
             .await;
             let calls = Arc::new(Mutex::new(Vec::new()));
             let captured = calls.clone();
-            with_factory(
+            let result = with_factory(
                 move |endpoint, _| {
                     captured.lock().unwrap().push(endpoint);
                     match endpoint {
@@ -514,12 +507,14 @@ fn windows_fallback_order_and_duplicate_identity_suppression() {
                             first.as_ref().map(Agent::connect).ok_or_else(|| "unavailable".into())
                         },
                         Endpoint::Pageant => Ok(second.connect()),
+                        _ => unreachable!("fixture has only two candidates"),
                     }
                 },
-                fixture.test(None),
+                fixture.attempt(&[Endpoint::OpenSsh, Endpoint::Pageant]),
             )
             .await
             .unwrap();
+            assert_eq!(result, Attempt::Authenticated);
             assert_eq!(*calls.lock().unwrap(), vec![Endpoint::OpenSsh, Endpoint::Pageant]);
         }
         let rejected = Identity::plain(key());
@@ -528,17 +523,19 @@ fn windows_fallback_order_and_duplicate_identity_suppression() {
         let fixture =
             Fixture::new(ServerOptions { password: Some("draft".into()), ..Default::default() })
                 .await;
-        with_factory(
+        let result = with_factory(
             move |endpoint, _| {
                 Ok(match endpoint {
                     Endpoint::OpenSsh => first.connect(),
                     Endpoint::Pageant => second.connect(),
+                    _ => unreachable!("fixture has only two candidates"),
                 })
             },
-            fixture.test(Some("draft")),
+            fixture.attempt(&[Endpoint::OpenSsh, Endpoint::Pageant]),
         )
         .await
         .unwrap();
+        assert_eq!(result, Attempt::Rejected { available: 2, attempted: 1 });
         assert_eq!(fixture.stats.offered.lock().unwrap().len(), 1);
     });
 }

@@ -62,7 +62,6 @@ fn applied(raw: &str) -> Result<(), SessionError> {
 
 /// Explicit install/remove uses the same planner and authenticated connection
 /// pool as automatic setup. A remote removal persists an opt-out on that host.
-#[cfg(windows)]
 pub(crate) fn setup_cli(destination: &str, remove: bool) -> i32 {
     let result = tokio::runtime::Builder::new_current_thread()
         .enable_all()

@@ -31,7 +31,6 @@ mod exec;
 mod integration;
 mod lifecycle;
 mod route;
-#[cfg(windows)]
 pub(crate) use integration::setup_cli as setup_ai_cli;
 use route::{ResolvedRoute, RouteTransport};
 
