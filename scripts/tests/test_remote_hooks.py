@@ -29,7 +29,10 @@ class RemoteHooksTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(prefix="pebrel-remote-hooks-")
         self.addCleanup(self.tmp.cleanup)
-        self.root = Path(self.tmp.name)
+        # macOS exposes its temporary directory through a system symlink.
+        # Ordinary fixture paths must exercise transactions, while redirection
+        # is supplied explicitly by the negative tests below.
+        self.root = Path(self.tmp.name).resolve()
         env = {"HOME": str(self.root), "PATH": os.environ["PATH"], "SHELL": "/bin/bash",
                "XDG_DATA_HOME": str(self.root / "data"), "XDG_CACHE_HOME": str(self.root / "cache"),
                "PEBREL_REMOTE_HOOK_TOKEN": TOKEN}
@@ -73,6 +76,34 @@ class RemoteHooksTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             files.apply([{"name": "bridge.py", "expected": None, "content": "bad"}])
         self.assertEqual(outside.read_text(), "preserve")
+
+    def test_symlinked_integration_directory_cannot_redirect_writes(self):
+        files = module("remote_files")
+        root, paths = files.locations()
+        outside = self.root / "outside"
+        outside.mkdir()
+        root.parent.mkdir(parents=True)
+        root.symlink_to(outside, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, "symbolic link"):
+            files.apply([{"name": "bridge.py", "expected": None, "content": "bad"}])
+        self.assertEqual(list(outside.iterdir()), [])
+
+    def test_bsd_ancestry_recognizes_interpreted_provider_without_trusting_other_arguments(self):
+        bridge = module("remote_bridge")
+        prefix = "400 Sat Sep 19 12:00:00 2026 "
+        for source, command in [
+            ("codex", "/usr/bin/python3 /private/var/fixture/codex"),
+            ("claude", "/usr/bin/node /opt/modules/@anthropic-ai/claude-code/cli.js"),
+            ("pi", "/usr/bin/node /opt/modules/pi-coding-agent/dist/cli.js"),
+        ]:
+            def ps_output(args, **kwargs):
+                observed = command if "args=" in args else command.split()[0]
+                return (prefix + observed).encode()
+            with self.subTest(source=source), patch.object(bridge.os, "getppid", return_value=500), patch.object(bridge.Path, "read_text", side_effect=FileNotFoundError), patch.object(bridge.subprocess, "check_output", side_effect=ps_output):
+                self.assertRegex(bridge.process_identity(source), r"^500:[a-f0-9]{16}$")
+        row = b"1 Sat Sep 19 12:00:00 2026 /usr/bin/python3 worker.py unrelated codex"
+        with patch.object(bridge.os, "getppid", return_value=500), patch.object(bridge.Path, "read_text", side_effect=FileNotFoundError), patch.object(bridge.subprocess, "check_output", return_value=row):
+            self.assertIsNone(bridge.process_identity("codex"))
 
     def test_installed_launcher_delivers_native_stdin_over_real_controlling_tty(self):
         import pty

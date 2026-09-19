@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import re
 import select
+import shlex
 import subprocess
 import sys
 import time
@@ -17,6 +18,13 @@ MAX_ENVELOPE = 64 * 1024
 MAX_STREAM_FILES = 4096
 
 
+def provider_argv_matches(source, argv):
+    arguments = argv[:3]
+    provider_paths = {"claude": "@anthropic-ai/claude-code/", "pi": "/pi-coding-agent/"}
+    path_match = source in provider_paths and any(provider_paths[source] in arg for arg in arguments)
+    return path_match or any(os.path.basename(arg) in (source, source + ".js", source + ".exe") for arg in arguments)
+
+
 def process_identity(source):
     """Resolve ancestry here, never accept a PID claimed by provider JSON."""
     pid = os.getppid()
@@ -24,11 +32,8 @@ def process_identity(source):
         try:
             stat = Path(f"/proc/{pid}/stat").read_text()
             fields = stat[stat.rfind(")") + 2:].split()
-            argv = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
-            names = [os.path.basename(arg.decode("utf-8", "replace")) for arg in argv[:3]]
-            provider_paths = {"claude": b"@anthropic-ai/claude-code/", "pi": b"/pi-coding-agent/"}
-            path_match = source in provider_paths and any(provider_paths[source] in arg for arg in argv[:3])
-            if path_match or any(name in (source, source + ".js", source + ".exe") for name in names):
+            argv = [arg.decode("utf-8", "replace") for arg in Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")[:3]]
+            if provider_argv_matches(source, argv):
                 return f"{pid}:{fields[19]}"
             parent = int(fields[1])
             if parent <= 1 or parent == pid:
@@ -41,12 +46,14 @@ def process_identity(source):
     for _ in range(24):
         try:
             row = subprocess.check_output(
-                ["ps", "-p", str(pid), "-o", "ppid=", "-o", "lstart=", "-o", "comm="],
+                ["ps", "-ww", "-p", str(pid), "-o", "ppid=", "-o", "lstart=", "-o", "args="],
                 stderr=subprocess.DEVNULL, timeout=0.15,
             ).decode().strip().split(None, 6)
             if len(row) != 7:
                 break
-            if os.path.basename(row[6]) in (source, source + ".js"):
+            # Interpreted providers report the interpreter as comm. Apply the
+            # same bounded argument-position rules as the native process table.
+            if provider_argv_matches(source, shlex.split(row[6])):
                 epoch = hashlib.sha256(" ".join(row[1:6]).encode()).hexdigest()[:16]
                 return f"{pid}:{epoch}"
             parent = int(row[0])
