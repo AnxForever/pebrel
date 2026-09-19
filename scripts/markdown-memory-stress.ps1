@@ -368,7 +368,6 @@ fn item_INDEX() -> usize {
     if ($script:handle -eq 0) { throw 'The test window did not appear.' }
     $script:scale = [MarkdownStressWindow]::GetDpiForWindow($script:handle)/144.0
     [void][MarkdownStressWindow]::MoveWindow($script:handle,0,0,[int](1938*$script:scale),[int](1103*$script:scale),$true)
-    if (-not $SkipEditing -and -not $TerminalOnly) { [void][MarkdownStressWindow]::SetForegroundWindow($script:handle) }
     $sampler = Start-Worker 'sample' $script:process.Id
     # Let one counter query finish before starting measured stages. Initial GPU
     # discovery can otherwise consume the entire first idle interval.
@@ -377,6 +376,13 @@ fn item_INDEX() -> usize {
         Pause-Checked 100
     }
     if (-not (Test-Path (Join-Path $OutputDirectory 'sampler-ready'))) { throw 'The memory sampler did not become ready within 60 seconds.' }
+    if (-not $SkipEditing -and -not $TerminalOnly) {
+        if ([MarkdownStressWindow]::GetForegroundWindow() -ne $script:handle -and -not [MarkdownStressWindow]::SetForegroundWindow($script:handle)) {
+            throw 'Windows did not grant foreground focus to the edit-test window.'
+        }
+        Pause-Checked 100
+        Assert-EditingFocus
+    }
     if ($TerminalOnly) {
         Phase 'terminal-never-opened-markdown'
         Pause-Checked ($IdleSeconds*1000)
