@@ -91,6 +91,7 @@ if ($Mode -eq 'serve') {
 if ($Mode -eq 'sample') {
     $timer = [Diagnostics.Stopwatch]::StartNew()
     $gpuAvailable = $true
+    $ready = $false
     while (-not (Test-Path (Join-Path $OutputDirectory "stop-sampling-$OwnerId"))) {
         $target = Get-Process -Id $OwnerId -ErrorAction SilentlyContinue
         if ($null -eq $target) { break }
@@ -122,6 +123,10 @@ if ($Mode -eq 'sample') {
             gpuDedicatedBytes=$dedicated;gpuSharedBytes=$shared;valid=(-not $panic)
             gpuQueryMilliseconds=$gpuTimer.Elapsed.TotalMilliseconds
         } | Export-Csv -NoTypeInformation -Encoding UTF8 -Append (Join-Path $OutputDirectory 'samples.csv')
+        if (-not $ready) {
+            Write-Utf8 (Join-Path $OutputDirectory 'sampler-ready') 'ready'
+            $ready = $true
+        }
         if ($panic) { break }
         Start-Sleep -Seconds 2
     }
@@ -365,6 +370,13 @@ fn item_INDEX() -> usize {
     [void][MarkdownStressWindow]::MoveWindow($script:handle,0,0,[int](1938*$script:scale),[int](1103*$script:scale),$true)
     if (-not $SkipEditing -and -not $TerminalOnly) { [void][MarkdownStressWindow]::SetForegroundWindow($script:handle) }
     $sampler = Start-Worker 'sample' $script:process.Id
+    # Let one counter query finish before starting measured stages. Initial GPU
+    # discovery can otherwise consume the entire first idle interval.
+    for ($retry = 0; $retry -lt 600 -and -not (Test-Path (Join-Path $OutputDirectory 'sampler-ready')); $retry++) {
+        if ($sampler.HasExited) { throw 'The memory sampler exited before its first sample.' }
+        Pause-Checked 100
+    }
+    if (-not (Test-Path (Join-Path $OutputDirectory 'sampler-ready'))) { throw 'The memory sampler did not become ready within 60 seconds.' }
     if ($TerminalOnly) {
         Phase 'terminal-never-opened-markdown'
         Pause-Checked ($IdleSeconds*1000)
@@ -436,7 +448,9 @@ fn item_INDEX() -> usize {
     Capture 'closed'
     $success = $true
 } catch {
-    Append-Json 'failure.jsonl' @{time=(Get-Date).ToString('o');message=$_.Exception.Message;phase=(Get-Content (Join-Path $OutputDirectory 'phase.txt') -ErrorAction SilentlyContinue)}
+    $phasePath = Join-Path $OutputDirectory 'phase.txt'
+    $failedPhase = if ([IO.File]::Exists($phasePath)) { [IO.File]::ReadAllText($phasePath,$utf8).Trim() } else { 'startup' }
+    Append-Json 'failure.jsonl' @{time=(Get-Date).ToString('o');message=$_.Exception.Message;phase=$failedPhase}
     Write-Warning $_.Exception.Message
 } finally {
     Write-Utf8 (Join-Path $OutputDirectory 'stop-server') 'stop'
@@ -464,10 +478,16 @@ fn item_INDEX() -> usize {
     $budget = if ($TerminalOnly) { $TerminalLimitMiB } else { $WorkingSetLimitMiB }
     $overBudget = @($rows | Where-Object { [double]$_.workingSetBytes/1MB -gt $budget })
     $processTargetsPassed = $phases.Count -gt 0 -and @($phases | Where-Object bothProcessMetricsWithinTarget -eq $false).Count -eq 0
+    $requiredPhases = if ($TerminalOnly) { @('terminal-never-opened-markdown') } else {
+        @('markdown-initial','markdown-tab-inactive','markdown-resumed','markdown-closed') + @(for ($round = 1; $round -le $Rounds; $round++) { "round-$round-bottom"; "round-$round-top" })
+    }
+    $missingPhases = @($requiredPhases | Where-Object { $_ -notin $phases.phase })
+    $phaseCoverageComplete = $missingPhases.Count -eq 0
     Write-Utf8 (Join-Path $OutputDirectory 'summary.json') (@{
         completed=$success;samplingComplete=$samplingComplete;phases=$phases
-        workingSetLimitMiB=$budget;workingSetBudgetPassed=($success -and $samplingComplete -and $rows.Count -gt 0 -and $overBudget.Count -eq 0)
-        processMemoryBudgetPassed=($success -and $samplingComplete -and $processTargetsPassed)
+        phaseCoverageComplete=$phaseCoverageComplete;missingPhases=$missingPhases
+        workingSetLimitMiB=$budget;workingSetBudgetPassed=($success -and $samplingComplete -and $phaseCoverageComplete -and $rows.Count -gt 0 -and $overBudget.Count -eq 0)
+        processMemoryBudgetPassed=($success -and $samplingComplete -and $phaseCoverageComplete -and $processTargetsPassed)
         requiresVisualCoverageReview=$true;limitsAreTargetsNotGuarantees=$true
     } | ConvertTo-Json -Depth 6)
     Write-Output "Evidence: $OutputDirectory"
