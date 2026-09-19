@@ -21,7 +21,12 @@ impl AssistantAnswer {
             "claude" if payload.get("hook_event_name")?.as_str()? == "Stop" => {
                 "last_assistant_message"
             },
-            "codex" if payload.get("type")?.as_str()? == "agent-turn-complete" => {
+            "codex" if payload.get("hook_event_name").and_then(Value::as_str) == Some("Stop") => {
+                "last_assistant_message"
+            },
+            "codex"
+                if payload.get("type").and_then(Value::as_str) == Some("agent-turn-complete") =>
+            {
                 "last-assistant-message"
             },
             _ => return None,

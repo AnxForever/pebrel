@@ -7,6 +7,9 @@ impl super::TerminalView {
     }
 
     pub(super) fn notify_command_done(&self, cx: &mut Context<Self>) {
+        if self.agent_activity.hook_seen() {
+            return;
+        }
         if let Some(started) = self.command_started
             && started.elapsed() >= crate::notify::COMMAND_NOTIFY_MIN
         {
@@ -20,25 +23,7 @@ impl super::TerminalView {
     }
 }
 
-/// 屏幕推导出的状态变化要不要弹提示。
-///
-/// `hooks` 表示当前 agent 会话是否已经收到 hook。有 hook 时，完成通知应等待
-/// `TurnDone`。看门狗连续识别到 Idle 界面也会把 Working / Blocked 降为 Done，
-/// 但界面可能在后台任务仍运行时显示 Idle，不能据此宣称回合完成。
-/// 这里仅控制通知；调用方仍保留屏幕状态自愈，无 hook 会话保留屏幕通知。
-pub(super) fn screen_notification(
-    previous: AgentStatus,
-    next: AgentStatus,
-    hooks: bool,
-) -> Option<bool> {
-    match next {
-        AgentStatus::Blocked if previous != AgentStatus::Blocked => Some(true),
-        AgentStatus::Done if matches!(previous, AgentStatus::Working | AgentStatus::Blocked) => {
-            (!hooks).then_some(false)
-        },
-        _ => None,
-    }
-}
+pub(super) use crate::ai_hook::lifecycle::screen_notification;
 
 pub(super) fn screen_program(
     current: Option<&str>,

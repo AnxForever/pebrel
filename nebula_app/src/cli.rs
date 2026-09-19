@@ -917,6 +917,9 @@ pub struct SetupAiOptions {
     /// installing them.
     #[clap(long)]
     pub remove: bool,
+    /// Install or remove hooks on an SSH host (alias or user@host).
+    #[clap(long, value_name = "DESTINATION")]
+    pub ssh: Option<String>,
 }
 
 /// Options for the `ssh` subcommand: every token after `ssh` is captured raw

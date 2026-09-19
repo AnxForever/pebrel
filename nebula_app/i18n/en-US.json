@@ -748,5 +748,10 @@
     "restore_failed": "This AI conversation could not be restored. Its saved target is preserved. Use Retry recovery in the tab menu, or locate it in session history.",
     "restore_ambiguous": "More than one native session file matches this conversation. The saved target is preserved; choose the exact conversation from session history.",
     "retry": "Retry session recovery"
-  }
+  },
+  "ssh.agent.unavailable": "No system SSH agent was available within the discovery timeout.",
+  "ssh.agent.empty": "The SSH agent returned no identities.",
+  "ssh.agent.rejected": "SSH agent identities were rejected (offered {attempted}, returned {available}).",
+  "ssh.agent.partial": "An SSH agent identity was accepted, but another authentication factor is required (offered {attempted}, returned {available}).",
+  "ssh.agent.fatal": "SSH agent authentication or signing failed; this connection has been discarded. Reconnect after checking the agent. {detail}"
 }

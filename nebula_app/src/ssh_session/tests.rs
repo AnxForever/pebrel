@@ -212,12 +212,13 @@ fn ssh_runtime_uses_global_network_proxy_and_keeps_openssh_proxy_jump() {
 #[test]
 fn auto_auth_plan_keeps_key_order_and_deduplicates_keys() {
     let explicit = vec![PathBuf::from(r"C:\Keys\chosen"), PathBuf::from(r"c:\keys\CHOSEN")];
-    let resolved = vec![PathBuf::from(r"C:\Keys\config")];
+    let resolved = vec![PathBuf::from(r"c:\keys\Chosen"), PathBuf::from(r"C:\Keys\config")];
 
     assert_eq!(
         authentication_plan(SshAuthMode::Auto, &explicit, &resolved),
         vec![
             AuthMethod::PrivateKey(PathBuf::from(r"C:\Keys\chosen")),
+            AuthMethod::Agent,
             AuthMethod::PrivateKey(PathBuf::from(r"C:\Keys\config")),
             AuthMethod::StoredPassword,
             AuthMethod::KeyboardInteractive,

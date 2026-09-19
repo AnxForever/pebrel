@@ -43,14 +43,14 @@ impl Display {
         // buffer so the icon still resolves when the grid read failed. Agent
         // parsing also understands package runners such as npx/uvx.
         state.last_committed = committed;
-        if let Some(agent) = crate::ai_agents::AgentKind::parse_command(&state.last_committed) {
+        if state.running_program.as_deref().and_then(crate::ai_agents::AgentKind::parse).is_some() {
+            state.agent_activity.input_sent();
+        } else if let Some(agent) =
+            crate::ai_agents::AgentKind::parse_command(&state.last_committed)
+        {
             state.running_program = Some(agent.slug().to_owned());
             state.command_started = Some(std::time::Instant::now());
-            state.agent_status = crate::ai_agents::AgentStatus::Working;
-            state.agent_status_source = crate::ai_agents::AgentStatusSource::Process;
-            state.agent_status_rule = None;
-            state.agent_hook_seen = false;
-            state.idle_screen_streak = 0;
+            state.agent_activity.begin_command(true);
             state.awaiting_input = false;
             state.finished_unseen = false;
             state.needs_attention = false;
