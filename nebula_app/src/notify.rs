@@ -135,6 +135,25 @@ pub(crate) fn clamp_toast_body(body: &str) -> String {
 }
 
 impl Notification {
+    /// Failed, interrupted or incomplete provider turns must not announce completion.
+    pub(crate) fn from_ai_hook(
+        event: &crate::ai_hook::AiHookEvent,
+        message: Option<String>,
+        attention: bool,
+    ) -> Option<Self> {
+        use crate::ai_hook::{AiHookKind, AiTurnOutcome};
+        if event.kind == AiHookKind::TurnDone
+            && (event.active_background_tasks() > 0
+                || matches!(
+                    event.turn_outcome,
+                    AiTurnOutcome::Failed | AiTurnOutcome::Cancelled | AiTurnOutcome::Incomplete
+                ))
+        {
+            return None;
+        }
+        Some(Self::AiTurn { program: event.source.clone(), message, attention })
+    }
+
     /// Source classification only. In-app preferences must not silence native
     /// notifications or infer an AI source from arbitrary message text.
     pub(crate) fn is_ai(&self) -> bool {

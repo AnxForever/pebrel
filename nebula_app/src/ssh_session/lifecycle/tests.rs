@@ -16,10 +16,14 @@ struct Events {
     exits: Arc<std::sync::atomic::AtomicUsize>,
     stages: Arc<Mutex<Vec<SshStage>>>,
     replies: Option<mpsc::UnboundedSender<Msg>>,
+    hooks: Arc<Mutex<Vec<Vec<u8>>>>,
 }
 
 impl EventListener for Events {
     fn send_event(&self, event: TerminalEvent) {
+        if let TerminalEvent::AiHookEnvelope(envelope) = &event {
+            self.hooks.lock().unwrap().push(envelope.clone());
+        }
         if let TerminalEvent::PtyWrite(reply) = &event
             && let Some(sender) = &self.replies
         {
@@ -64,6 +68,8 @@ enum Mode {
     HangFirstConnection,
     ExecEof,
     ExecHang,
+    Integration,
+    RejectIntegration,
 }
 
 struct Loopback {
@@ -72,6 +78,7 @@ struct Loopback {
     data: mpsc::UnboundedSender<Vec<u8>>,
     window_changes: mpsc::UnboundedSender<WindowSize>,
     channels: Vec<Channel<server::Msg>>,
+    scripts: std::collections::HashMap<ChannelId, Vec<u8>>,
 }
 
 impl server::Handler for Loopback {
@@ -84,9 +91,38 @@ impl server::Handler for Loopback {
     async fn exec_request(
         &mut self,
         channel: ChannelId,
-        _command: &[u8],
+        command: &[u8],
         session: &mut Session,
     ) -> Result<(), Self::Error> {
+        if command == b"python3 -" {
+            if matches!(self.mode, Mode::Integration | Mode::RejectIntegration) {
+                self.scripts.insert(channel, Vec::new());
+                return session.channel_success(channel);
+            }
+            return session.channel_failure(channel);
+        }
+        if command.starts_with(b"exec ")
+            && matches!(self.mode, Mode::Integration | Mode::RejectIntegration)
+        {
+            self.data.send(b"bootstrap".to_vec()).unwrap();
+            if self.mode == Mode::RejectIntegration {
+                return session.channel_failure(channel);
+            }
+            use base64::Engine as _;
+            let command = std::str::from_utf8(command).unwrap();
+            let token = command
+                .split('\'')
+                .find(|part| part.len() == 32 && part.bytes().all(|b| b.is_ascii_hexdigit()))
+                .unwrap();
+            let envelope = b"nebula-hook/1 source=codex codex_hooks=full process=42:100\n{\"hook_event_name\":\"SessionStart\",\"session_id\":\"ssh\",\"bridge_sequence\":1}";
+            let encoded = base64::engine::general_purpose::STANDARD.encode(envelope);
+            // The server rejects env requests; bootstrap must carry its own token.
+            session.channel_success(channel)?;
+            session.data(channel, format!("\x1b]777;nebula-hook;00000000000000000000000000000000;{encoded}\x07\x1b]777;nebula-hook;{token};{encoded}\x07\x1b]133;A\x07"))?;
+            session.exit_status_request(channel, 0)?;
+            session.eof(channel)?;
+            return Ok(());
+        }
         session.channel_success(channel)?;
         if self.mode == Mode::ExecEof {
             session.data(channel, &b"probe result\n"[..])?;
@@ -191,11 +227,69 @@ impl server::Handler for Loopback {
 
     async fn data(
         &mut self,
-        _channel: ChannelId,
+        channel: ChannelId,
         data: &[u8],
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
+        if let Some(script) = self.scripts.get_mut(&channel) {
+            script.extend_from_slice(data);
+            return Ok(());
+        }
         let _ = self.data.send(data.to_vec());
+        Ok(())
+    }
+
+    async fn channel_eof(
+        &mut self,
+        channel: ChannelId,
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        let Some(script) = self.scripts.remove(&channel) else { return Ok(()) };
+        use base64::Engine as _;
+        use serde_json::json;
+        let script = std::str::from_utf8(&script).unwrap();
+        let encoded =
+            script.rsplit("base64.b64decode('").next().unwrap().split('\'').next().unwrap();
+        let request: serde_json::Value = serde_json::from_slice(
+            &base64::engine::general_purpose::STANDARD.decode(encoded).unwrap(),
+        )
+        .unwrap();
+        let action = request["action"].as_str().unwrap();
+        self.data.send(action.as_bytes().to_vec()).unwrap();
+        let result = if action == "snapshot" {
+            let files: serde_json::Map<String, serde_json::Value> = [
+                "claude",
+                "codex",
+                "codex_config",
+                "opencode",
+                "pi",
+                "manifest",
+                "disabled",
+                "pebrel-hook",
+                "bridge.py",
+                "shell.py",
+                "bashrc",
+                ".zshenv",
+                ".zprofile",
+                ".zshrc",
+            ]
+            .into_iter()
+            .map(|name| {
+                (
+                    name.into(),
+                    json!({"path":format!("/test/{name}"), "sha256":null, "content":null}),
+                )
+            })
+            .collect();
+            json!({"version":1,"root":"/test","python":"/usr/bin/python3","files":files,"providers":{},"codex_version":"","codex_features":""})
+        } else {
+            assert!(
+                request["files"].as_array().unwrap().iter().any(|file| file["name"] == "shell.py")
+            );
+            json!({"version":1,"applied":true})
+        };
+        session.data(channel, format!("PEBREL_INTEGRATION={result}\n"))?;
+        session.eof(channel)?;
         Ok(())
     }
 }
@@ -403,6 +497,7 @@ impl Fixture {
                     data: data_tx.clone(),
                     window_changes: window_changes_tx.clone(),
                     channels: Vec::new(),
+                    scripts: Default::default(),
                 };
                 first = false;
                 let config = config.clone();
@@ -430,6 +525,47 @@ impl Fixture {
     async fn forget(&self, session: &SharedSession) {
         super::super::evict_pooled_session(&self.route.pool_key(), session).await;
     }
+}
+
+#[test]
+fn integration_exec_routes_only_the_current_channel_token_without_accept_env() {
+    check(async {
+        let mut fixture = Fixture::new(Mode::Integration).await;
+        let acquired = fixture.connect().await;
+        let events = Events::default();
+        let terminal = terminal(&events);
+        let (mut channel, token) = open_shell(&acquired, size(), None, &events).await.unwrap();
+        for expected in [b"snapshot".as_slice(), b"apply", b"bootstrap"] {
+            assert_eq!(fixture.data.recv().await.unwrap(), expected);
+        }
+        let (_sender, mut input) = mpsc::unbounded_channel();
+        pump(&mut channel, token, size(), &terminal, &events, &mut input).await.unwrap();
+        let hooks = events.hooks.lock().unwrap();
+        assert_eq!(hooks.len(), 1, "a foreign pane token must never become an event");
+        let event = crate::ai_hook::parse_remote_envelope(&hooks[0], Some(1)).unwrap();
+        assert_eq!(event.remote_process.as_deref(), Some("42:100"));
+        assert_eq!(event.session_id.as_deref(), Some("ssh"));
+        drop(hooks);
+        fixture.forget(&acquired.session).await;
+    });
+}
+
+#[test]
+fn rejected_integration_exec_falls_back_to_a_fresh_ordinary_shell_channel() {
+    check(async {
+        let mut fixture = Fixture::new(Mode::RejectIntegration).await;
+        let acquired = fixture.connect().await;
+        let (channel, _) =
+            open_shell(&acquired, size(), Some("/requested"), &Events::default()).await.unwrap();
+        for expected in [b"snapshot".as_slice(), b"apply", b"bootstrap", b"cd '/requested'\r"] {
+            assert_eq!(fixture.data.recv().await.unwrap(), expected);
+        }
+        assert!(channel.pending.iter().any(
+            |message| matches!(message, ChannelMsg::Data{data} if data.starts_with(b"welcome"))
+        ));
+        drop(channel);
+        fixture.forget(&acquired.session).await;
+    });
 }
 
 #[test]

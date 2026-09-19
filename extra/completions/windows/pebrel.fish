@@ -518,6 +518,7 @@ complete -c pebrel -n "__fish_pebrel_using_subcommand config; and __fish_seen_su
 complete -c pebrel -n "__fish_pebrel_using_subcommand config; and __fish_seen_subcommand_from help" -f -a "init" -d 'Create an annotated Lua configuration template'
 complete -c pebrel -n "__fish_pebrel_using_subcommand config; and __fish_seen_subcommand_from help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
 complete -c pebrel -n "__fish_pebrel_using_subcommand notify-test" -s h -l help -d 'Print help'
+complete -c pebrel -n "__fish_pebrel_using_subcommand setup-ai" -l ssh -d 'Install or remove hooks on an SSH host (alias or user@host)' -r
 complete -c pebrel -n "__fish_pebrel_using_subcommand setup-ai" -l remove -d 'Remove Pebrel\'s hooks from claude\'s settings.json instead of installing them'
 complete -c pebrel -n "__fish_pebrel_using_subcommand setup-ai" -s h -l help -d 'Print help'
 complete -c pebrel -n "__fish_pebrel_using_subcommand ssh" -s h -l help -d 'Print help'

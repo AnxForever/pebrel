@@ -42,16 +42,15 @@ impl TerminalView {
             }
         }
         suggest::commit_line(&mut self.suggest);
+        if agent_already_active {
+            self.agent_activity.input_sent();
+            return;
+        }
         if let Some(agent) =
             crate::ai_agents::AgentKind::parse_command(&self.suggest.last_committed)
         {
             self.running_program = Some(agent.slug().to_owned());
-            self.agent_status = crate::ai_agents::AgentStatus::Working;
-            self.agent_status_source = crate::ai_agents::AgentStatusSource::Process;
-            self.agent_status_rule = None;
-            self.agent_hook_seen = false;
-            self.agent_turn_active = true;
-            self.idle_screen_streak = 0;
+            self.agent_activity.begin_command(true);
             self.command_started = Some(std::time::Instant::now());
             cx.emit(TerminalViewEvent::TitleChanged);
             cx.notify();
