@@ -890,13 +890,19 @@ settings files.
   cutoff; logs and final diagnostics report returned and offered counts. A server
   that stops offering public-key authentication ends the agent step. Partial
   success skips further public keys and continues to the second factor.
-- **Budgets:** Connection and identity enumeration share at most 1.5 seconds per
-  endpoint and 3 seconds in total. Public selector reads have a separate 1 second
+- **Budgets:** Async connection and identity enumeration share a deadline of
+  1.5 seconds per endpoint and 3 seconds in total. Public selector reads have a separate 1 second
   budget and 64 KiB per regular file. Signing may need user confirmation, so it
   uses the existing 300 second formal authentication budget. Confirmation time
   does not consume a later endpoint's discovery allowance. Test Connection and
   unattended jump authentication retain a 12 second authentication limit, with
   an agent-specific diagnostic if it expires during that step.
+- **Native cancellation limit:** The locked Pageant 0.2.1 window-message transport
+  calls synchronous `SendMessageA` from an async worker. A caller deadline cannot
+  preempt that native call or reclaim a worker blocked by an unresponsive legacy
+  provider. The named-pipe busy case is cancellable and separately tested. A
+  stronger guarantee for the legacy transport requires an upstream or native
+  adapter change; protocol timeout tests alone do not establish that guarantee.
 - **Failure and cancellation:** Unavailable, empty and rejected agents are safe
   fallback results; partial success and authenticated are separate outcomes.
   Signer, session-channel and signing-timeout errors propagate immediately. The
