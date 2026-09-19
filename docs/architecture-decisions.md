@@ -851,3 +851,66 @@ settings files.
   upstream and execution evidence. Remove the Claude fallback once supported
   clients negotiate the keyboard protocol here. A missing remote process identity
   still cannot authorize a session switch based on cwd or screen text.
+
+## ADR-0022 — System SSH agent authentication and transport ownership
+
+- **Status:** Implemented, 2026-09-19; pending repository review. This record does
+  not claim a release or acceptance with every third-party credential manager.
+- **Context:** Auto authentication had no system-agent step, so a host whose key
+  existed only in an agent failed both connection entry points. Legacy `agent`
+  profiles still decoded as Auto but had lost their authentication capability.
+  Reintroducing platform APIs without compile-time guards would repeat a
+  cross-platform build defect. Treating a signer failure as ordinary rejection
+  can leave the underlying SSH task waiting for a signature indefinitely.
+- **Policy authority:** `ssh_session::authentication_plan` continues to own the
+  order shared by formal and test connections: explicit disk keys, system agent,
+  resolved/default disk keys, saved password, keyboard-interactive, then a password
+  prompt. Key path deduplication spans both disk-key groups. A nonempty draft
+  password replaces the saved-password step in Test Connection; it cannot bypass
+  the selected authentication mode. Password mode retains password/PAM only,
+  PublicKey retains disk keys only, and KeyboardInteractive retains that method
+  only. The legacy profile migration remains unchanged.
+- **Agent boundary:** `ssh_session::agent` owns platform discovery, public identity
+  selectors, signing and structured results. Windows tries the standard OpenSSH
+  pipe and then Pageant; Unix uses `SSH_AUTH_SOCK`. Platform methods are compiled
+  only for their target, with no endpoints on other targets. Existing russh
+  support supplies the protocol, dynamic stream, public keys, certificates and
+  RSA SHA-256/SHA-512 signatures. There is no new dependency, persisted setting,
+  credential store, worker, authentication mode or agent forwarding.
+- **Identity scope:** Every host, including a jump host, opens its own agent
+  connection and ranks identities using that host's public selectors. Explicit
+  selectors precede resolved selectors; other identities retain their returned
+  order. Public-key comments do not affect equality; certificate selectors match
+  their underlying public key. No private material is loaded by this module.
+  Duplicate identity blobs are offered only once across endpoints, while a
+  certificate remains distinct from its raw key. There is no unexplained identity
+  cutoff; logs and final diagnostics report returned and offered counts. A server
+  that stops offering public-key authentication ends the agent step. Partial
+  success skips further public keys and continues to the second factor.
+- **Budgets:** Connection and identity enumeration share at most 1.5 seconds per
+  endpoint and 3 seconds in total. Public selector reads have a separate 1 second
+  budget and 64 KiB per regular file. Signing may need user confirmation, so it
+  uses the existing 300 second formal authentication budget. Confirmation time
+  does not consume a later endpoint's discovery allowance. Test Connection and
+  unattended jump authentication retain a 12 second authentication limit, with
+  an agent-specific diagnostic if it expires during that step.
+- **Failure and cancellation:** Unavailable, empty and rejected agents are safe
+  fallback results; partial success and authenticated are separate outcomes.
+  Signer, session-channel and signing-timeout errors propagate immediately. The
+  caller drops its unpooled transport on error or cancellation. It must not send
+  a password, change agents or merely enqueue Disconnect on a transport that
+  may still be waiting for Signed. Only fully authenticated handles enter the
+  pool; an already authenticated jump connection keeps its own lifetime.
+- **Validation:** Tests use generated keys, an isolated agent wire service and
+  real loopback SSH servers. They cover both entry points, legacy migration,
+  strict modes, disk-key order, fallback, discovery timeout, signer refusal and
+  disconnect, signing timeout and cancellation, transport closure, certificates,
+  both RSA hashes, selectors and independent jump/target identities. Native
+  adapter fixtures use private pipe/socket names; the Unix environment test runs
+  in a child process so parallel tests cannot change each other's agent. No test
+  enumerates a user's real credentials. Platform compilation and native fixture
+  results must be reported separately from live credential-manager acceptance.
+- **Revisit condition:** Custom IdentityAgent, IdentitiesOnly and agent forwarding
+  need their own explicit policies and tests. They are not implicitly enabled by
+  restoring Auto authentication. Reconsider identity attempt selection with
+  server-limit evidence; do not silently reintroduce a fixed truncation.

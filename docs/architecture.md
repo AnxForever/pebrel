@@ -26,6 +26,7 @@ to rename all existing directories or create abstract interfaces everywhere.
 | `nebula_app/src/math` | Parse, validate, layout, compile and cache responsibilities | A duplicated per-shell math engine |
 | `nebula_app/src/platform` | Explicit platform capabilities and native adapters | A dumping ground for unrelated logic |
 | `nebula_app/src/ai_hook` | Normalized provider facts, bounded ordering, one shared pane lifecycle and owned installation policy; Windows adapters | Screen keyword rules or a separate state machine per UI shell |
+| `nebula_app/src/ssh_session/agent.rs` | System SSH agent discovery, identity selection and signing outcomes; fresh scope per host | A second authentication plan, credential store or agent forwarding service |
 | `nebula_app/src/ssh_session/integration.rs` | Authenticated exec/PTY orchestration for remote hook installation and shell startup | Provider policy or a second Agent state machine |
 | `nebula_app/src/ai_agents` | Agent identity and structurally constrained screen observations | Authority to overwrite hook results or infer remote completion from silence |
 | `nebula_app/src/gpui_shell` | GPUI views, UI state, commands and subscriptions | A second settings/domain implementation |

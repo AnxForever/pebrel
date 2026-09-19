@@ -18,10 +18,13 @@ use super::{SessionError, SharedSession, SshDestination, SshEventHost, SshStage}
 pub(super) const NETWORK_TIMEOUT: Duration = Duration::from_secs(20);
 const AUTH_RESPONSE_TIMEOUT: Duration = Duration::from_secs(300);
 
-pub(super) async fn authentication<T>(
+pub(super) async fn authentication<T, Error>(
     operation: &str,
-    future: impl Future<Output = Result<T, russh::Error>>,
-) -> Result<T, SessionError> {
+    future: impl Future<Output = Result<T, Error>>,
+) -> Result<T, SessionError>
+where
+    Error: Into<SessionError>,
+{
     network_with_budget(operation, AUTH_RESPONSE_TIMEOUT, future).await
 }
 
