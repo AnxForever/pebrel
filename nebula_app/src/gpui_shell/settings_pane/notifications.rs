@@ -3,7 +3,7 @@ use super::*;
 #[cfg(all(test, feature = "gpui-test-support"))]
 mod tests;
 
-#[cfg(all(test, feature = "gpui-test-support", target_os = "windows"))]
+#[cfg(all(test, feature = "gpui-test-support"))]
 mod native_tests;
 
 impl SettingsPane {

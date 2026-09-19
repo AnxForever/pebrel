@@ -152,6 +152,8 @@ In **Settings → Terminal → Alerts**, **Notification duration** selects **Use
 lifetimes: short toasts last 5 seconds, message banners 90 seconds, and update
 notices remain until dismissed. The saved preference applies to all newly shown
 or refreshed in-app cards, independently of the AI-toast visibility switch.
+Only the latest three cards are retained; newer cards replace older ones without
+performing their actions, including in persistent mode.
 Hiding a card never approves or rejects a request or changes task state; requests
 remain available in their terminals and updates in Settings. System notifications
 are unchanged. The persisted key is `notification_duration`, with values `default`,

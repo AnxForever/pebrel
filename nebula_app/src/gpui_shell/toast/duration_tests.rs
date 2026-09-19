@@ -54,67 +54,78 @@ fn every_timed_mode_expires_at_its_selected_duration_without_activating_actions(
         NotificationDuration::ThirtySeconds,
         NotificationDuration::NinetySeconds,
     ] {
-        let mut window = open(duration, cx);
-        let actions = Rc::new(Cell::new(0));
-        let invoked = actions.clone();
-        let update_action = actions.clone();
-        window.update(|window, cx| {
-            toast(window, cx, ToastKind::Success, format!("Timed toast {duration:?}"));
-            banner(window, cx, ToastKind::Warning, "Timed non-AI banner");
-            push_notification(
-                window,
-                cx,
-                note(ToastKind::Info, "Update-style action fixture".into())
-                    .on_click(move |_, _, _| update_action.set(update_action.get() + 1)),
-                None,
-            );
-            push_banner(
-                window,
-                cx,
-                note(ToastKind::Info, "Timed fixture".into())
-                    .id::<AiToast>()
-                    .on_click(move |_, _, _| invoked.set(invoked.get() + 1)),
-                true,
-            );
-        });
-        advance(&mut window, duration.timeout(None).unwrap() - Duration::from_millis(1));
-        assert_eq!(ids(&mut window).len(), 4, "every card kind uses the selected lifetime");
-        advance(&mut window, Duration::from_millis(1));
-        settle_dismissal(&mut window);
-        assert!(ids(&mut window).is_empty());
-        assert_eq!(actions.get(), 0, "autohide must not perform the card's action");
+        // Exercise every kind without overflowing the three visible slots.
+        for action_cards in [false, true] {
+            let mut window = open(duration, cx);
+            let actions = Rc::new(Cell::new(0));
+            let invoked = actions.clone();
+            let update_action = actions.clone();
+            window.update(|window, cx| {
+                if action_cards {
+                    push_notification(
+                        window,
+                        cx,
+                        note(ToastKind::Info, "Update-style action fixture".into())
+                            .on_click(move |_, _, _| update_action.set(update_action.get() + 1)),
+                        None,
+                    );
+                    push_banner(
+                        window,
+                        cx,
+                        note(ToastKind::Info, "Timed fixture".into())
+                            .id::<AiToast>()
+                            .on_click(move |_, _, _| invoked.set(invoked.get() + 1)),
+                        true,
+                    );
+                } else {
+                    toast(window, cx, ToastKind::Success, format!("Timed toast {duration:?}"));
+                    banner(window, cx, ToastKind::Warning, "Timed non-AI banner");
+                }
+            });
+            advance(&mut window, duration.timeout(None).unwrap() - Duration::from_millis(1));
+            assert_eq!(ids(&mut window).len(), 2, "every card kind uses the selected lifetime");
+            advance(&mut window, Duration::from_millis(1));
+            settle_dismissal(&mut window);
+            assert!(ids(&mut window).is_empty());
+            assert_eq!(actions.get(), 0, "autohide must not perform the card's action");
+        }
     }
 }
 
 #[gpui::test]
 fn persistent_mode_has_no_expiry_and_retains_manual_dismissal(cx: &mut TestAppContext) {
-    let mut window = open(NotificationDuration::Persistent, cx);
-    window.update(|window, cx| {
-        toast(window, cx, ToastKind::Success, "Persistent ordinary toast");
-        banner(window, cx, ToastKind::Warning, "Persistent non-AI banner");
-        push_notification(
-            window,
-            cx,
-            note(ToastKind::Info, "Persistent update fixture".into()),
-            None,
-        );
-        confirmation_for_pane(
-            window,
-            cx,
-            "Persistent confirmation".into(),
-            8201,
-            BinaryConfirmation { id: 8301, question: "Continue?".into() },
-        );
-    });
-    advance(&mut window, Duration::from_secs(3600));
-    assert_eq!(ids(&mut window).len(), 4);
-    window.update(|window, cx| {
-        for notification in window.notifications(cx).iter() {
-            notification.update(cx, |notification, cx| notification.dismiss(window, cx));
-        }
-    });
-    settle_dismissal(&mut window);
-    assert!(ids(&mut window).is_empty());
+    for action_cards in [false, true] {
+        let mut window = open(NotificationDuration::Persistent, cx);
+        window.update(|window, cx| {
+            if action_cards {
+                push_notification(
+                    window,
+                    cx,
+                    note(ToastKind::Info, "Persistent update fixture".into()),
+                    None,
+                );
+                confirmation_for_pane(
+                    window,
+                    cx,
+                    "Persistent confirmation".into(),
+                    8201,
+                    BinaryConfirmation { id: 8301, question: "Continue?".into() },
+                );
+            } else {
+                toast(window, cx, ToastKind::Success, "Persistent ordinary toast");
+                banner(window, cx, ToastKind::Warning, "Persistent non-AI banner");
+            }
+        });
+        advance(&mut window, Duration::from_secs(3600));
+        assert_eq!(ids(&mut window).len(), 2);
+        window.update(|window, cx| {
+            for notification in window.notifications(cx).iter() {
+                notification.update(cx, |notification, cx| notification.dismiss(window, cx));
+            }
+        });
+        settle_dismissal(&mut window);
+        assert!(ids(&mut window).is_empty());
+    }
 }
 
 #[gpui::test]
@@ -177,30 +188,45 @@ fn a_refreshed_persistent_card_cannot_be_closed_by_its_predecessors_timer(cx: &m
 fn default_mode_preserves_short_toasts_banners_and_persistent_update_notices(
     cx: &mut TestAppContext,
 ) {
-    let mut window = open(NotificationDuration::Default, cx);
-    let persistent = window.update(|window, cx| {
-        push_notification(window, cx, note(ToastKind::Info, "Default update fixture".into()), None);
-        let persistent = window.notifications(cx)[0].entity_id();
-        banner(window, cx, ToastKind::Warning, "Default non-AI configuration fixture");
-        toast(window, cx, ToastKind::Success, "Default ordinary copy fixture");
-        confirmation_for_pane(
-            window,
-            cx,
-            "Default confirmation fixture".into(),
-            8204,
-            BinaryConfirmation { id: 8304, question: "Continue?".into() },
-        );
-        persistent
-    });
-    assert_eq!(ids(&mut window).len(), 4);
-    advance(&mut window, Duration::from_secs(5));
-    settle_dismissal(&mut window);
-    assert_eq!(ids(&mut window).len(), 3);
-    advance(&mut window, Duration::from_secs(85));
-    settle_dismissal(&mut window);
-    assert_eq!(ids(&mut window), vec![persistent]);
-    advance(&mut window, Duration::from_secs(3600));
-    assert_eq!(ids(&mut window), vec![persistent]);
+    for ai_banner in [false, true] {
+        let mut window = open(NotificationDuration::Default, cx);
+        let persistent = window.update(|window, cx| {
+            push_notification(
+                window,
+                cx,
+                note(ToastKind::Info, "Default update fixture".into()),
+                None,
+            );
+            let persistent = window.notifications(cx)[0].entity_id();
+            if ai_banner {
+                confirmation_for_pane(
+                    window,
+                    cx,
+                    "Default confirmation fixture".into(),
+                    8204,
+                    BinaryConfirmation { id: 8304, question: "Continue?".into() },
+                );
+            } else {
+                banner(window, cx, ToastKind::Warning, "Default non-AI configuration fixture");
+            }
+            toast(
+                window,
+                cx,
+                ToastKind::Success,
+                format!("Default ordinary copy fixture {ai_banner}"),
+            );
+            persistent
+        });
+        assert_eq!(ids(&mut window).len(), 3);
+        advance(&mut window, Duration::from_secs(5));
+        settle_dismissal(&mut window);
+        assert_eq!(ids(&mut window).len(), 2);
+        advance(&mut window, Duration::from_secs(85));
+        settle_dismissal(&mut window);
+        assert_eq!(ids(&mut window), vec![persistent]);
+        advance(&mut window, Duration::from_secs(3600));
+        assert_eq!(ids(&mut window), vec![persistent]);
+    }
 }
 
 #[gpui::test]
@@ -265,4 +291,64 @@ fn startup_notifications_use_the_latest_duration_after_the_root_is_installed(
     let mut window = window.clone();
     advance(&mut window, Duration::from_secs(3600));
     assert_eq!(ids(&mut window).len(), 2);
+}
+
+#[gpui::test]
+fn persistent_notification_bursts_release_hidden_cards_without_running_actions(
+    cx: &mut TestAppContext,
+) {
+    let mut window = open(NotificationDuration::Persistent, cx);
+    let actions = Rc::new(Cell::new(0));
+    let notices = window.update(|window, cx| {
+        (0..128)
+            .map(|index| {
+                let invoked = actions.clone();
+                push_notification(
+                    window,
+                    cx,
+                    note(ToastKind::Info, format!("Persistent burst {index}"))
+                        .on_click(move |_, _, _| invoked.set(invoked.get() + 1)),
+                    None,
+                );
+                window.notifications(cx).last().unwrap().downgrade()
+            })
+            .collect::<Vec<_>>()
+    });
+    advance(&mut window, Duration::from_secs(3600));
+    let expected =
+        notices.iter().rev().take(3).rev().map(|note| note.entity_id()).collect::<Vec<_>>();
+    assert_eq!(ids(&mut window), expected, "hidden persistent cards must not form a backlog");
+    assert!(notices[..125].iter().all(|note| note.upgrade().is_none()));
+    assert_eq!(actions.get(), 0);
+}
+
+#[gpui::test]
+fn overflow_removal_cannot_dismiss_a_refreshed_confirmation(cx: &mut TestAppContext) {
+    let mut window = open(NotificationDuration::Persistent, cx);
+    let (old, expected) = window.update(|window, cx| {
+        let push = |window: &mut Window, cx: &mut App| {
+            confirmation_for_pane(
+                window,
+                cx,
+                "Overflow confirmation".into(),
+                8206,
+                BinaryConfirmation { id: 8306, question: "Continue?".into() },
+            );
+        };
+        push(window, cx);
+        let old = window.notifications(cx)[0].clone();
+        for index in 0..3 {
+            banner(window, cx, ToastKind::Info, format!("Newer card {index}"));
+        }
+        // The old entity's removal event has not been delivered yet.
+        push(window, cx);
+        let notes = window.notifications(cx);
+        let expected =
+            notes.iter().rev().take(3).rev().map(|note| note.entity_id()).collect::<Vec<_>>();
+        assert_ne!(old.entity_id(), *expected.last().unwrap());
+        (old, expected)
+    });
+    advance(&mut window, Duration::from_secs(3600));
+    assert_eq!(ids(&mut window), expected);
+    drop(old);
 }

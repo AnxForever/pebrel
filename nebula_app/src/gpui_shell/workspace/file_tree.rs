@@ -3,6 +3,7 @@
 //! 几何与密度以旧 OpenGL 壳的 `display::side_panel::panel_layout`
 //! （side_panel.rs:1695）和它的行水洗（同文件 2712-2800）为基准，不自创数字。
 
+use crate::display::side_panel::PanelNotice;
 use std::ops::Range;
 use std::path::PathBuf;
 
@@ -316,32 +317,22 @@ impl NebulaWorkspace {
         let search_active = !self.side_panel.search.trim().is_empty();
         let search_pending = self.side_panel.file_search_pending();
         let search_error = self.side_panel.file_search_error().is_some();
-        let indexed_count = self.side_panel.file_indexed_count();
-        let indexed_more = if self.side_panel.file_index_truncated() { "+" } else { "" };
         let search_status = if search_active {
+            use crate::i18n::Message;
             Some(if search_error {
-                language.pick("正则表达式无效", "Invalid regular expression").to_owned()
-            } else if self.side_panel.file_index_status()
-                == crate::display::side_panel::FileIndexStatus::Building
-            {
-                language.pick("正在建立文件索引…", "Building file index...").to_owned()
+                language.text(Message::FilesSearchFailed).to_owned()
             } else if search_pending {
-                language.pick("正在搜索…", "Searching...").to_owned()
+                language.text(Message::FilesSearchRunning).to_owned()
+            } else if self.side_panel.file_index_truncated() {
+                language.format(
+                    Message::FilesSearchLimited,
+                    &[("count", &self.side_panel.file_rows().len().to_string())],
+                )
             } else {
-                match language {
-                    crate::display::UiLanguage::ZhCn => format!(
-                        "{} 个结果 · 已索引 {}{} 项",
-                        self.side_panel.file_search_total(),
-                        indexed_count,
-                        indexed_more
-                    ),
-                    _ => format!(
-                        "{} results · {}{} indexed",
-                        self.side_panel.file_search_total(),
-                        indexed_count,
-                        indexed_more
-                    ),
-                }
+                language.format(
+                    Message::FilesSearchCount,
+                    &[("count", &self.side_panel.file_search_total().to_string())],
+                )
             })
         } else {
             None
@@ -546,7 +537,7 @@ impl NebulaWorkspace {
                             })),
                     ),
             )
-            .when_some(self.side_panel.root_notice(), |panel, notice| {
+            .when_some(self.side_panel.localized_root_notice(crate::gpui_shell::config::ui_language(cx)), |panel, notice| {
                 panel.child(div().text_xs().text_color(theme.warning).child(notice.to_owned()))
             })
             .child(search_box)
@@ -624,26 +615,35 @@ impl NebulaWorkspace {
             return None;
         }
         if !self.side_panel.search.trim().is_empty() {
+            use crate::i18n::Message;
+            let language = super::workspace_ui_language();
             return Some(if let Some(error) = self.side_panel.file_search_error() {
                 crate::ux::EmptyState::new(
-                    "正则表达式无效",
+                    language.text(Message::FilesSearchFailed),
                     error.to_owned(),
-                    "修改表达式，或关闭右侧的 .* 选项。",
+                    language.text(Message::FilesSearchRetry),
                 )
             } else if self.side_panel.file_search_pending() {
                 crate::ux::EmptyState::new(
-                    "正在建立索引",
-                    "文件名索引正在后台准备，界面仍可继续使用。",
-                    "索引完成后会自动显示当前查询的结果。",
+                    language.text(Message::FilesSearchRunning),
+                    language.text(Message::FilesSearchProgress),
+                    language.text(Message::FilesSearchContinue),
+                )
+            } else if self.side_panel.file_index_truncated() {
+                crate::ux::EmptyState::new(
+                    language.text(Message::FilesSearchIncomplete),
+                    language.text(Message::FilesSearchLimitReason),
+                    language.text(Message::FilesSearchNarrow),
                 )
             } else {
                 crate::ux::EmptyState::new(
-                    "没有匹配的文件",
-                    "当前目录的索引中没有符合条件的文件或文件夹。",
-                    "修改查询，或关闭大小写、全词、正则选项后重试。",
+                    language.text(Message::FilesSearchEmpty),
+                    language.text(Message::FilesSearchEmptyReason),
+                    language.text(Message::FilesSearchRetry),
                 )
             });
         }
+
         Some(if self.side_panel.snapshot_pending() {
             crate::ux::EmptyState::new(
                 "正在读取目录",
@@ -774,7 +774,7 @@ impl NebulaWorkspace {
         cx: &mut Context<Self>,
     ) {
         if !path.exists() {
-            self.side_panel.set_notice("路径已不存在".to_owned());
+            self.side_panel.set_notice(PanelNotice::PathUnavailable);
             cx.notify();
             return;
         }
@@ -810,7 +810,7 @@ impl NebulaWorkspace {
                             this.side_panel.request_refresh();
                             this.sync_side_panel_to_active(false, cx);
                         },
-                        Err(error) => this.side_panel.set_notice(format!("删除失败：{error}")),
+                        Err(error) => this.side_panel.set_notice(PanelNotice::DeleteFailed(error)),
                     }
                     cx.notify();
                 });
@@ -836,22 +836,16 @@ impl NebulaWorkspace {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
                 use crate::display::side_panel::IgnoreOutcome;
-                use crate::i18n::Message;
-                let language = crate::gpui_shell::config::ui_language(cx);
                 let notice = match result {
-                    Ok(IgnoreOutcome::Added { entry, .. }) => {
-                        language.format(Message::FilesIgnoreAdded, &[("entry", &entry)])
-                    },
-                    Ok(IgnoreOutcome::Removed { entry, .. }) => {
-                        language.format(Message::FilesIgnoreRemoved, &[("entry", &entry)])
-                    },
+                    Ok(IgnoreOutcome::Added { entry, .. }) => PanelNotice::IgnoreAdded(entry),
+                    Ok(IgnoreOutcome::Removed { entry, .. }) => PanelNotice::IgnoreRemoved(entry),
                     Ok(IgnoreOutcome::AlreadyPresent { entry }) => {
-                        language.format(Message::FilesIgnorePresent, &[("entry", &entry)])
+                        PanelNotice::IgnorePresent(entry)
                     },
                     Ok(IgnoreOutcome::AlreadyVisible { entry }) => {
-                        language.format(Message::FilesIgnoreVisible, &[("entry", &entry)])
+                        PanelNotice::IgnoreVisible(entry)
                     },
-                    Err(error) => language.format(Message::FilesIgnoreFailed, &[("error", &error)]),
+                    Err(error) => PanelNotice::IgnoreFailed(error),
                 };
                 this.side_panel.set_notice(notice);
                 this.side_panel.request_refresh();

@@ -36,7 +36,8 @@ fn duration_control_is_searchable_keyboard_accessible_and_keeps_the_delivery_swi
         let _ = window.draw(cx);
     });
     assert_eq!(pane.read_with(window, |pane, _| pane.active_section), 2);
-    let bounds = window.debug_bounds("notification-duration-select").expect("duration select");
+    let bounds =
+        window.debug_bounds("settings-select-notification_duration").expect("duration select");
     assert_eq!(bounds.size.width, px(SETTINGS_SELECT_WIDTH));
     window.simulate_click(bounds.center(), Modifiers::default());
     window.run_until_parked();
@@ -107,7 +108,8 @@ fn choosing_a_duration_persists_it_and_a_failed_save_restores_the_visible_select
     window.update(|window, cx| {
         let _ = window.draw(cx);
     });
-    let bounds = window.debug_bounds("notification-duration-select").expect("duration select");
+    let bounds =
+        window.debug_bounds("settings-select-notification_duration").expect("duration select");
     window.simulate_click(bounds.center(), Modifiers::default());
     window.run_until_parked();
     for key in ["down", "down", "down", "down", "down", "enter"] {
@@ -135,7 +137,7 @@ fn choosing_a_duration_persists_it_and_a_failed_save_restores_the_visible_select
     let backup = directory.join("settings-before-error.txt");
     std::fs::rename(&path, &backup).unwrap();
     std::fs::create_dir(&path).unwrap();
-    let bounds = window.debug_bounds("notification-duration-select").unwrap();
+    let bounds = window.debug_bounds("settings-select-notification_duration").unwrap();
     window.simulate_click(bounds.center(), Modifiers::default());
     window.run_until_parked();
     for key in ["up", "up", "up", "up", "up", "enter"] {

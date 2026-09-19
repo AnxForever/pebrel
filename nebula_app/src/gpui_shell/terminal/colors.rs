@@ -22,12 +22,15 @@ pub struct Palette {
     pub dim_foreground: Rgba,
     /// 块状光标的填充色（主应用 NEBULA_DEFAULT_CURSOR 的 background）。
     pub cursor: Rgba,
+    /// Text rendered inside a solid block cursor.  `None` keeps the existing
+    /// background-colored fallback used by themes without an explicit value.
+    pub cursor_text: Option<Rgba>,
     /// 主题可为 bar/underline 光标指定与 block 不同的颜色（如 Nord）。
     pub cursor_stroke: Option<Rgba>,
     /// 选区叠加色。主应用默认是反色语义；本壳以半透明叠加近似，
     /// 用户显式配置 `colors.selection.background` 时用不透明具体色。
     pub selection: Rgba,
-    /// 主题明确声明的选区文字色；普通 Nebula 主题保留原字色。
+    /// 主题或用户明确声明的选区文字色；未声明时保留原字色。
     pub selection_foreground: Option<Rgba>,
     /// ANSI 0-15。
     pub ansi: [Rgba; 16],
@@ -45,6 +48,7 @@ impl Default for Palette {
             bright_foreground: rgb8(0xd6, 0xda, 0xea),
             dim_foreground: Self::dim_of(rgb8(0xd6, 0xda, 0xea)),
             cursor: rgb8(0x49, 0x4d, 0x72),
+            cursor_text: None,
             cursor_stroke: None,
             selection: Rgba { a: 0.60, ..rgb8(0x49, 0x4d, 0x72) },
             selection_foreground: None,

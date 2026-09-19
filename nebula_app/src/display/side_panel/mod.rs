@@ -25,12 +25,14 @@ use unicode_width::UnicodeWidthChar;
 mod enumerate;
 mod gitignore;
 mod icons;
+mod notice;
 #[cfg(feature = "legacy-shell")]
 mod render;
 mod search;
 #[cfg(test)]
 mod tests;
 mod vcs;
+pub(crate) use notice::PanelNotice;
 
 // 子模块的项一律 `pub(crate)`：本 crate 是 bin，没有下游用户，所以拆分不必
 // 把内部实现抬到 `pub`。glob 转发让 `display::side_panel::X` 这层路径不变。
@@ -134,7 +136,7 @@ pub struct GitInfo {
     pub staged: Vec<(char, String)>,
     /// 合并冲突（porcelain 的 U*/AA/DD；SVN 的 `C`）。冲突路径**同时**保留
     /// 在 `staged`/`unstaged` 里：旧壳视图零改动照常显示，GPUI 壳按本列表
-    /// 单独分组并从另两组过滤（VS Code 的 Merge Changes 合同）。
+    /// 单独分组并从暂存和未暂存两组过滤，避免冲突路径重复显示。
     pub conflicts: Vec<(char, String)>,
     /// `git log --all --date-order` 的最近提交。显示层依据对象 ID 和父提交
     /// 生成连续轨道，不把 `git --graph` 的字符画当成视觉数据。
@@ -395,7 +397,7 @@ pub struct SidePanel {
     /// `custom_root` 互斥，且不改变终端实际 cwd / Git 跟随位置。
     custom_wsl_root: Option<crate::shell_detect::WslCwd>,
     /// Visible feedback for an invalid/disappeared custom root.
-    root_notice: Option<String>,
+    root_notice: Option<PanelNotice>,
     /// Flattened visible tree rows for the Files view.
     rows: Vec<FileRow>,
     /// Last unfiltered tree snapshot. Search results replace `rows`, but
@@ -414,9 +416,10 @@ pub struct SidePanel {
     /// Whether the filter box owns the keyboard.
     pub search_focus: bool,
     search_selection: super::text_input::SelectAllState,
-    /// Everything-style, root-scoped filename index. It owns a worker thread;
+    /// Root-scoped bounded filename cache with on-demand streamed search;
     /// rendering only submits queries and harvests generation-checked rows.
     file_index: EmbeddedFileIndex,
+    search_memory: Option<FileSearchMemory>,
     search_options: FileSearchOptions,
     search_generation: u64,
     search_applied_generation: u64,
@@ -448,14 +451,14 @@ pub struct SidePanel {
     /// Set by the worker when it finishes — `sync` folds it into a refresh.
     op_done: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Last operation's error (empty = success), shown on the summary line.
-    op_error: std::sync::Arc<std::sync::Mutex<String>>,
+    op_error: std::sync::Arc<std::sync::Mutex<PanelNotice>>,
     /// A snapshot worker (fs walk + git subprocesses) is in flight. Guards
     /// against stacking workers; a refresh requested meanwhile re-arms
     /// `needs_refresh` and runs after this one lands.
     snapshot_running: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// The worker's finished snapshot, harvested by `sync` on the next frame.
     /// 切换视图/根不再同步跑 git——旧内容原样留在屏上，新快照落地后整体
-    /// 替换（VSCode 的树刷新模式）。
+    /// 替换。
     snapshot_slot: std::sync::Arc<std::sync::Mutex<Option<PanelSnapshot>>>,
     /// 上一份落地快照的枚举是否失败（WSL 超时 / find 非零退出）。UI 靠它区分
     /// "读不到"和"目录真的是空的"。
@@ -510,6 +513,7 @@ impl SidePanel {
             search_focus: false,
             search_selection: Default::default(),
             file_index: EmbeddedFileIndex::new(),
+            search_memory: None,
             search_options: FileSearchOptions::default(),
             search_generation: 0,
             search_applied_generation: 0,
@@ -541,12 +545,30 @@ impl SidePanel {
     pub fn toggle(&mut self, view: PanelView) {
         if self.open && self.view == view {
             self.open = false;
+            self.file_index.clear_query();
+            self.rows = Vec::new();
+            self.search_memory = None;
             self.selected = None;
             self.drag_file = None;
             return;
         }
+        let resume_search = !self.open || self.view != PanelView::Files;
         self.open = true;
         self.view = view;
+        if view == PanelView::Git {
+            self.file_index.clear_query();
+            self.rows = Vec::new();
+            self.search_memory = None;
+        } else if resume_search && !self.search.trim().is_empty() {
+            self.file_index.query(
+                self.search_index_epoch,
+                self.search_generation,
+                self.search.clone(),
+                self.search_options,
+            );
+        } else if resume_search {
+            self.rows = self.tree_rows.clone();
+        }
         self.scroll = 0;
         self.needs_refresh = true;
     }
@@ -574,7 +596,7 @@ impl SidePanel {
             return false;
         }
         // 先收割落地的后台快照——旧内容在工人跑动期间一直显示，这里一次
-        // 性换成新内容（先显示旧的、再更新，VSCode 的树刷新模式）。
+        // 性换成新内容，避免刷新期间出现空白。
         let mut changed = self.harvest_snapshot();
         changed |= self.harvest_file_search();
         // 聚焦 pane 报不出位置时（SSH、shell 尚未发 OSC）保留最后一个有效根；
@@ -617,7 +639,7 @@ impl SidePanel {
         let custom_invalidated = self.custom_root.as_ref().is_some_and(|root| !root.is_dir());
         if custom_invalidated {
             self.custom_root = None;
-            self.root_notice = Some("所选目录不可用，已跟随当前目录".to_owned());
+            self.root_notice = Some(PanelNotice::FollowingDirectory);
         }
         let next_root = self
             .custom_root
@@ -698,7 +720,9 @@ impl SidePanel {
 
     fn harvest_file_search(&mut self) -> bool {
         let Some(result) = self.file_index.take_result() else { return false };
-        if result.epoch != self.search_index_epoch
+        if !self.open
+            || self.view != PanelView::Files
+            || result.epoch != self.search_index_epoch
             || self.search_index_root != self.current_index_root()
             || result.generation != self.search_generation
             || result.query != self.search
@@ -707,10 +731,13 @@ impl SidePanel {
             return false;
         }
         self.rows = result.rows;
+        self.search_memory = Some(result.memory);
         self.search_total = result.total;
         self.search_error = result.error;
+        if self.search_applied_generation != result.generation {
+            self.scroll = 0;
+        }
         self.search_applied_generation = result.generation;
-        self.scroll = 0;
         true
     }
 
@@ -718,7 +745,7 @@ impl SidePanel {
     /// belongs to one window and this field is deliberately never serialized.
     pub fn set_custom_root(&mut self, root: PathBuf) -> bool {
         if !root.is_dir() {
-            self.root_notice = Some("所选目录不可用".to_owned());
+            self.root_notice = Some(PanelNotice::DirectoryUnavailable);
             return false;
         }
         let changed = self.custom_root.as_ref() != Some(&root) || self.root.as_ref() != Some(&root);
@@ -826,8 +853,12 @@ impl SidePanel {
         self.scroll = 0;
     }
 
-    pub fn root_notice(&self) -> Option<&str> {
-        self.root_notice.as_deref()
+    pub fn root_notice(&self) -> Option<String> {
+        self.localized_root_notice(crate::i18n::UiLanguage::ZhCn)
+    }
+
+    pub fn localized_root_notice(&self, language: crate::i18n::UiLanguage) -> Option<String> {
+        self.root_notice.as_ref().map(|notice| notice.text(language))
     }
 
     /// Only real Git file rows are interactive. Section headers and the blank
@@ -854,8 +885,8 @@ impl SidePanel {
     }
 
     /// 面板顶部的一句话提示（复用根目录不可用的同一条 UI）。
-    pub fn set_notice(&mut self, message: String) {
-        self.root_notice = Some(message);
+    pub fn set_notice(&mut self, message: impl Into<PanelNotice>) {
+        self.root_notice = Some(message.into());
     }
 
     fn current_index_root(&self) -> Option<FileIndexRoot> {
@@ -881,10 +912,11 @@ impl SidePanel {
         self.search_generation = self.search_generation.wrapping_add(1);
         self.search_error = None;
         self.search_total = 0;
-        let active_query = if self.search.trim().is_empty() {
+        let active_query = if self.search.trim().is_empty() || self.view != PanelView::Files {
             None
         } else {
-            self.rows.clear();
+            self.rows = Vec::new();
+            self.search_memory = None;
             Some((self.search_generation, self.search.clone(), self.search_options))
         };
         self.file_index.rebuild(root, self.search_index_epoch, active_query);
@@ -895,8 +927,9 @@ impl SidePanel {
         self.needs_refresh = false;
         let Some(root) = self.root.clone() else {
             // 没有根：清空是即时且无成本的，不需要工人。
-            self.rows.clear();
-            self.tree_rows.clear();
+            self.rows = Vec::new();
+            self.tree_rows = Vec::new();
+            self.search_memory = None;
             self.git = None;
             self.sync_file_index();
             return;
@@ -1007,7 +1040,8 @@ impl SidePanel {
         self.search_generation = self.search_generation.wrapping_add(1);
         if self.search.trim().is_empty() {
             self.file_index.clear_query();
-            self.rows.clone_from(&self.tree_rows);
+            self.rows = self.tree_rows.clone();
+            self.search_memory = None;
             self.search_applied_generation = self.search_generation;
             return;
         }
@@ -1216,18 +1250,15 @@ impl SidePanel {
             return;
         }
         let Ok(read) = std::fs::read_dir(dir) else { return };
-        let entries: Vec<(bool, String, PathBuf)> = read
-            .flatten()
-            .filter_map(|e| {
-                let name = e.file_name().to_string_lossy().into_owned();
-                // `.git` is noise in a file tree; everything else shows.
-                if name == ".git" {
-                    return None;
-                }
-                let is_dir = e.file_type().ok()?.is_dir();
-                Some((is_dir, name, e.path()))
-            })
-            .collect();
+        let entries = read.flatten().filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            // `.git` is noise in a file tree; everything else shows.
+            if name == ".git" {
+                return None;
+            }
+            let is_dir = e.file_type().ok()?.is_dir();
+            Some((is_dir, name, e.path()))
+        });
         for (is_dir, name, path) in Self::ordered_entries(entries, MAX_PER_DIR) {
             if rows.len() >= MAX_ROWS {
                 return;
@@ -1257,12 +1288,37 @@ impl SidePanel {
     /// this repo's 318 entries start with `.`) that pushes `nebula_app`, `docs`
     /// and the rest of the real tree past the cap, leaving a screen of `.tmp-*`.
     fn ordered_entries(
-        mut entries: Vec<(bool, String, PathBuf)>,
+        entries: impl IntoIterator<Item = (bool, String, PathBuf)>,
         cap: usize,
     ) -> Vec<(bool, String, PathBuf)> {
-        entries.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.to_lowercase().cmp(&b.1.to_lowercase())));
-        entries.truncate(cap);
-        entries
+        // Retain the alphabetical head while enumerating, including for a
+        // single directory with hundreds of thousands of entries. Collecting
+        // everything before truncate defeats both the row and memory limits.
+        let mut kept: Vec<(bool, String, PathBuf)> = Vec::with_capacity(cap);
+        let mut bytes = kept.capacity() * std::mem::size_of::<(bool, String, PathBuf)>();
+        for entry in entries {
+            let position = kept
+                .binary_search_by(|other| {
+                    entry.0.cmp(&other.0).then(other.1.to_lowercase().cmp(&entry.1.to_lowercase()))
+                })
+                .unwrap_or_else(|position| position);
+            if position >= cap {
+                continue;
+            }
+            let cost = entry.1.capacity() + entry.2.capacity();
+            while kept.len() >= cap || bytes + cost > 512 * 1024 {
+                if kept.len() <= position {
+                    break;
+                }
+                let Some(removed) = kept.pop() else { break };
+                bytes -= removed.1.capacity() + removed.2.capacity();
+            }
+            if position <= kept.len() && kept.len() < cap && bytes + cost <= 512 * 1024 {
+                bytes += cost;
+                kept.insert(position, entry);
+            }
+        }
+        kept
     }
 
     /// Annotate the already-sorted snapshot in one `git check-ignore` call. This
@@ -1288,11 +1344,7 @@ impl SidePanel {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            command.creation_flags(0x0800_0000);
-        }
+        crate::platform::process::hidden_command(&mut command);
         let Ok(mut child) = command.spawn() else { return };
         let Some(mut stdin) = child.stdin.take() else { return };
         for path in candidates {

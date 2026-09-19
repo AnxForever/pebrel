@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 #[test]
-#[ignore = "requires a Windows desktop and an isolated PEBREL_NOTIFICATION_QA_DIR/config"]
+#[ignore = "requires a native desktop and an isolated PEBREL_NOTIFICATION_QA_DIR/config"]
 fn native_notification_duration_menu_keeps_all_choices_visible() {
     let output = PathBuf::from(std::env::var_os("PEBREL_NOTIFICATION_QA_DIR").expect("QA output"));
     assert!(output.is_absolute());

@@ -32,6 +32,7 @@ pub use crate::display::ToastKind;
 /// `DUPLICATE_COOLDOWN` 同值同义；只挡逐字相同的文本）。
 const DUPLICATE_COOLDOWN: Duration = Duration::from_millis(600);
 const TOAST_TTL: Duration = Duration::from_secs(5);
+const MAX_NOTIFICATIONS: usize = 3;
 
 /// 组件库 Notification 默认固定 `w_112`，短短一句也会铺成近半个窗口。
 /// Nebula 的 toast 按内容收缩；过长消息到此上限后自然换行。
@@ -150,8 +151,8 @@ pub fn render_layer(window: &mut Window, cx: &mut App) -> Option<AnyElement> {
     let mut items = list.read(cx).notifications();
     // 与旧壳同屏上限一致。保留队尾三条，顺序仍是旧→新，因此 v_flex
     // 底部锚定后最新项自然落在最下面。
-    if items.len() > 3 {
-        items.drain(..items.len() - 3);
+    if items.len() > MAX_NOTIFICATIONS {
+        items.drain(..items.len() - MAX_NOTIFICATIONS);
     }
     if items.is_empty() {
         return None;
@@ -337,7 +338,7 @@ fn push_with_duration(
     let note = notification.autohide(false);
     if window.root::<Root>().flatten().is_some() {
         window.push_notification(note, cx);
-        schedule_notification_dismiss(window, cx, default_timeout);
+        finish_notification_insertion(window, cx, default_timeout);
     } else {
         window.defer(cx, move |window, cx| {
             // The preference may change before the startup Root is installed.
@@ -346,7 +347,7 @@ fn push_with_duration(
             }
             if window.root::<Root>().flatten().is_some() {
                 window.push_notification(note, cx);
-                schedule_notification_dismiss(window, cx, default_timeout);
+                finish_notification_insertion(window, cx, default_timeout);
             } else {
                 log::warn!("notification dropped because the window Root is unavailable");
             }
@@ -354,26 +355,33 @@ fn push_with_duration(
     }
 }
 
-/// 给刚推入的通知挂一个到期关闭的定时器；常驻模式不创建定时器。
+/// Release cards outside the visible stack, then schedule the inserted card's expiry.
+/// Persistent cards have no timer. Retiring a hidden card emits the component's
+/// removal event without invoking click, action or close callbacks. As with identity
+/// replacement, retirement discards presentation only; domain state stays with its owner.
 ///
 /// 组件库把 autohide 做成 bool、5s 写死在 `NotificationList::push` 里，没有
 /// 自定义时长的入口；为这个改 fork 要动 rev pin，不值得。换个办法：push 之后
 /// 队尾那条就是我们刚推的，抓住它的**弱**引用，到点自己调 `dismiss`。用户
 /// 提前点掉时弱引用已经失效，定时器什么也不做，不会去误关后来的消息。
-fn schedule_notification_dismiss(
+fn finish_notification_insertion(
     window: &mut Window,
     cx: &mut App,
     default_timeout: Option<Duration>,
 ) {
+    let Some(Some(root)) = window.root::<Root>() else { return };
+    let list = root.read(cx).notification.clone();
+    let notes = list.read(cx).notifications();
+    for note in notes.iter().take(notes.len().saturating_sub(MAX_NOTIFICATIONS)) {
+        note.update(cx, |_, cx| cx.emit(gpui::DismissEvent));
+    }
     let timeout = cx
         .try_global::<super::config::Settings>()
         .map(|settings| settings.notification_duration)
         .unwrap_or_default()
         .timeout(default_timeout);
     let Some(timeout) = timeout else { return };
-    let Some(Some(root)) = window.root::<Root>() else { return };
-    let list = root.read(cx).notification.clone();
-    let Some(note) = list.read(cx).notifications().last().cloned() else { return };
+    let Some(note) = notes.last() else { return };
     let note = note.downgrade();
     window
         .spawn(cx, async move |cx| {

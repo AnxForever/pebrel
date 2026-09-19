@@ -252,11 +252,15 @@ impl SidePanel {
 
     /// Last mutation's error, if any (cleared by the next successful op).
     pub fn op_error(&self) -> Option<String> {
-        let e = self.op_error.lock().ok()?;
-        (!e.is_empty()).then(|| e.clone())
+        self.localized_op_error(crate::i18n::UiLanguage::ZhCn)
     }
 
-    fn set_op_error(&mut self, message: impl Into<String>) {
+    pub fn localized_op_error(&self, language: crate::i18n::UiLanguage) -> Option<String> {
+        let text = self.op_error.lock().ok()?.text(language);
+        (!text.is_empty()).then_some(text)
+    }
+
+    fn set_op_error(&mut self, message: impl Into<PanelNotice>) {
         if let Ok(mut error) = self.op_error.lock() {
             *error = message.into();
         }
@@ -274,29 +278,25 @@ impl SidePanel {
         let done = self.op_done.clone();
         let error = self.op_error.clone();
         if let Ok(mut message) = error.lock() {
-            message.clear();
+            *message = PanelNotice::default();
         }
         let display_name = program.display().to_string();
         let spawn_result =
             std::thread::Builder::new().name("nebula-vcs-op".into()).spawn(move || {
                 let mut cmd = std::process::Command::new(&program);
                 cmd.args(&args).current_dir(&root);
-                #[cfg(windows)]
-                {
-                    use std::os::windows::process::CommandExt;
-                    cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-                }
+                crate::platform::process::hidden_command(&mut cmd);
                 let msg = match cmd.output() {
-                    Ok(out) if out.status.success() => String::new(),
+                    Ok(out) if out.status.success() => PanelNotice::default(),
                     Ok(out) => {
                         let err = String::from_utf8_lossy(&out.stderr);
                         // First meaningful line is enough for a status strip.
                         err.lines()
                             .find(|l| !l.trim().is_empty())
-                            .unwrap_or(&format!("{display_name} 失败"))
-                            .to_string()
+                            .map(|line| PanelNotice::Raw(line.to_owned()))
+                            .unwrap_or_else(|| PanelNotice::CommandFailed(display_name.clone()))
                     },
-                    Err(e) => format!("{display_name}: {e}"),
+                    Err(e) => PanelNotice::Raw(format!("{display_name}: {e}")),
                 };
                 if let Ok(mut slot) = error.lock() {
                     *slot = msg;
@@ -306,7 +306,7 @@ impl SidePanel {
             });
         if let Err(spawn_error) = spawn_result {
             self.op_running.store(false, Ordering::Relaxed);
-            self.set_op_error(format!("无法启动版本控制任务: {spawn_error}"));
+            self.set_op_error(PanelNotice::TaskStartFailed(spawn_error.to_string()));
         }
     }
 
@@ -363,11 +363,8 @@ impl SidePanel {
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null());
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW 不会隐藏 Tortoise GUI。
-        }
+        // 只压掉它自己的控制台；TortoiseProc 的 GUI 窗口照旧出现。
+        crate::platform::process::hidden_command(&mut command);
         match command.spawn() {
             Ok(_) => {
                 self.set_op_error(String::new());
@@ -419,14 +416,14 @@ impl SidePanel {
         }
     }
 
-    /// `git add -- <path>`：单文件暂存（VS Code 行内 ＋ 的合同）。
+    /// `git add -- <path>`：单文件暂存，对应行内 ＋ 操作。
     pub fn git_stage_path(&mut self, path: &str) {
         if self.vcs() == Some(VcsKind::Git) && !self.op_running() {
             self.spawn_git(vec!["add".into(), "--".into(), path.to_owned()]);
         }
     }
 
-    /// `git restore --staged -- <path>`：单文件取消暂存（VS Code 行内 −）。
+    /// `git restore --staged -- <path>`：单文件取消暂存，对应行内 − 操作。
     pub fn git_unstage_path(&mut self, path: &str) {
         if self.vcs() == Some(VcsKind::Git) && !self.op_running() {
             self.spawn_git(vec!["restore".into(), "--staged".into(), "--".into(), path.to_owned()]);
@@ -588,11 +585,9 @@ impl SidePanel {
 
     // ---- SVN 可视化操作（全部委托 TortoiseSVN）----
     //
-    // 为什么整批委托而不自己实现：装 SVN 的人里一多半只装了 TortoiseSVN，
-    // 没装命令行客户端；而这些操作（日志、锁定、合并、属性…）真正的成本不在
-    // 发命令，而在它们各自的对话框——修订区间选择、冲突三窗对比、属性编辑器。
-    // 重做一遍那些界面既是重复劳动，行为还会和用户已经熟悉的小乌龟不一致。
-    // 所以这里只做一件事：把面板当前的选择翻译成 TortoiseProc 的参数。
+    // 用户可能只安装图形客户端。日志、锁定、合并、属性等操作需要各自的
+    // 对话框，包括修订区间选择、冲突三窗对比和属性编辑器。
+    // 这里复用已安装客户端的界面，将面板当前选择翻译成 TortoiseProc 参数。
 
     /// 工作副本根的日志。
     pub fn svn_log(&mut self) {
@@ -657,7 +652,7 @@ impl SidePanel {
         self.launch_working_copy_dialog("properties", path)
     }
 
-    /// 冲突编辑器（TortoiseMerge 三窗对比）。面板里已有的「解决」是
+    /// 打开外部三窗冲突编辑器。面板里已有的「解决」是
     /// `--accept working`——那是"我已经手工改好了"，这个才是去改。
     pub fn svn_conflict_editor_path(&mut self, path: &str) -> bool {
         self.launch_working_copy_dialog("conflicteditor", path)
@@ -846,12 +841,8 @@ pub(crate) fn run_git(
     location: &str,
     timeout: Option<Duration>,
 ) -> Option<String> {
-    // Suppress the console window that `Command` flashes on Windows GUI apps.
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-    }
+    // 从 GUI 进程起子进程时闪的那个控制台窗口，见 `platform::process`。
+    crate::platform::process::hidden_command(&mut cmd);
     let out = match command_output_with_timeout(cmd, timeout) {
         Ok(output) => output,
         Err(error) => {
@@ -897,7 +888,7 @@ pub(crate) fn collect_git_info(run: impl Fn(&[&str]) -> Option<String>) -> Optio
                 info.unstaged.push(('?', path));
                 continue;
             }
-            // Merge conflicts (VS Code's "Merge Changes" group). The path
+            // Collect merge conflicts in their own group. The path
             // also stays in staged/unstaged below so the legacy view keeps
             // rendering it untouched.
             if x == 'U' || y == 'U' || (x == 'A' && y == 'A') || (x == 'D' && y == 'D') {
@@ -997,8 +988,8 @@ pub(crate) fn parse_svn_status(status: &str) -> Vec<(char, String)> {
 
 /// Snapshot SVN state for `root`. The CLI（`svn info`/`svn status`）is tried
 /// first for maximum fidelity; machines without a command-line client
-/// (TortoiseSVN installs GUI only) fall back to reading `.svn/wc.db`
-/// directly（`svn_status` 模块，TSVNCache 同款路线）。`None` means the path
+/// fall back to reading `.svn/wc.db`
+/// directly through `svn_status`. `None` means the path
 /// is not a working copy at all.
 pub(crate) fn read_svn(root: &Path) -> Option<GitInfo> {
     match crate::svn_status::classify_dir(root) {
@@ -1084,11 +1075,7 @@ pub(crate) fn read_svn_cli(root: &Path) -> Option<GitInfo> {
         let mut cmd = Command::new("svn");
         // 交互式认证提示会把无头子进程挂死；快照必须是非交互的。
         cmd.arg("--non-interactive").args(args).current_dir(root);
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-        }
+        crate::platform::process::hidden_command(&mut cmd);
         let out = cmd.output().ok()?;
         if !out.status.success() {
             let stderr = String::from_utf8_lossy(&out.stderr);

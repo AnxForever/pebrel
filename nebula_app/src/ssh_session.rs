@@ -25,9 +25,13 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use crate::event::EventProxy;
 use crate::proxy_test::{ProxyTestFailure, ProxyTestOutcome, ProxyTestResult, ProxyTestRoute};
 
+mod agent;
+mod config;
 mod exec;
+mod integration;
 mod lifecycle;
 mod route;
+pub(crate) use integration::setup_cli as setup_ai_cli;
 use route::{ResolvedRoute, RouteTransport};
 
 /// Remote terminals have no pre-primed ConPTY handshake or host row anchoring.
@@ -120,6 +124,7 @@ fn report_stage<H: SshEventHost>(progress: Option<&H>, stage: SshStage) {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum AuthMethod {
     PrivateKey(PathBuf),
+    Agent,
     StoredPassword,
     KeyboardInteractive,
     PromptPassword,
@@ -140,28 +145,27 @@ fn authentication_plan(
 ) -> Vec<AuthMethod> {
     use crate::ssh_profiles::SshAuthMode;
 
-    let key_methods = || {
+    let key_methods = |with_agent| {
         let mut seen = Vec::<String>::new();
-        explicit_keys
-            .iter()
-            .chain(resolved_keys)
-            .filter(|path| {
+        let mut methods = Vec::new();
+        for (index, paths) in [explicit_keys, resolved_keys].into_iter().enumerate() {
+            if with_agent && index == 1 {
+                methods.push(AuthMethod::Agent);
+            }
+            for path in paths {
                 let normalized = path.to_string_lossy().to_lowercase();
-                if seen.contains(&normalized) {
-                    false
-                } else {
+                if !seen.contains(&normalized) {
                     seen.push(normalized);
-                    true
+                    methods.push(AuthMethod::PrivateKey(path.clone()));
                 }
-            })
-            .cloned()
-            .map(AuthMethod::PrivateKey)
-            .collect::<Vec<_>>()
+            }
+        }
+        methods
     };
 
     match mode {
         SshAuthMode::Auto => {
-            let mut methods = key_methods();
+            let mut methods = key_methods(true);
             methods.extend([
                 AuthMethod::StoredPassword,
                 AuthMethod::KeyboardInteractive,
@@ -179,7 +183,7 @@ fn authentication_plan(
                 AuthMethod::PromptPassword,
             ]
         },
-        SshAuthMode::PublicKey => key_methods(),
+        SshAuthMode::PublicKey => key_methods(false),
         SshAuthMode::KeyboardInteractive => vec![AuthMethod::KeyboardInteractive],
     }
 }
@@ -241,6 +245,14 @@ impl SshDestination {
             }
         }
 
+        match config::resolve_from_ssh_config(&original) {
+            Ok(Some(destination)) => return Ok(destination),
+            Ok(None) => {},
+            Err(message) => {
+                return Err(io::Error::new(io::ErrorKind::InvalidData, message));
+            },
+        }
+
         if let Ok(destination) = Self::parse(&original) {
             return Ok(destination);
         }
@@ -287,6 +299,11 @@ fn ssh_config_probe_target(value: &str) -> Cow<'_, str> {
 }
 
 fn parse_host_port(host_port: &str) -> io::Result<(String, u16)> {
+    let (host, port) = parse_host_port_optional(host_port)?;
+    Ok((host, port.unwrap_or(22)))
+}
+
+fn parse_host_port_optional(host_port: &str) -> io::Result<(String, Option<u16>)> {
     let (host, port) = if let Some(rest) = host_port.strip_prefix('[') {
         let (host, suffix) = rest
             .split_once(']')
@@ -295,20 +312,19 @@ fn parse_host_port(host_port: &str) -> io::Result<(String, u16)> {
             .strip_prefix(':')
             .map(str::parse)
             .transpose()
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "无效的 SSH 端口"))?
-            .unwrap_or(22);
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "无效的 SSH 端口"))?;
         (host.to_owned(), port)
     } else if let Some((host, port)) = host_port.rsplit_once(':') {
         if host.contains(':') {
-            (host_port.to_owned(), 22)
+            (host_port.to_owned(), None)
         } else {
             let port = port
                 .parse()
                 .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "无效的 SSH 端口"))?;
-            (host.to_owned(), port)
+            (host.to_owned(), Some(port))
         }
     } else {
-        (host_port.to_owned(), 22)
+        (host_port.to_owned(), None)
     };
     if host.is_empty() {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "SSH 主机为空"));
@@ -323,15 +339,23 @@ fn parse_resolved_config(original: &str, text: &str) -> Option<SshDestination> {
     let mut identity_files = Vec::new();
     let mut proxy_jump = None;
     for line in text.lines() {
-        let (key, value) = line.split_once(char::is_whitespace)?;
-        let value = value.trim();
+        let tokens = crate::ssh::ssh_config_tokens(line);
+        let Some(key) = tokens.first() else { continue };
+        let value = tokens[1..].join(" ");
+        if value.is_empty() {
+            continue;
+        }
         match key.to_ascii_lowercase().as_str() {
             "user" if user.is_none() => user = Some(value.to_owned()),
             "hostname" if host.is_none() => host = Some(value.to_owned()),
             "port" if port.is_none() => port = value.parse().ok(),
-            "identityfile" => identity_files.push(expand_home(value)),
+            "identityfile" => {
+                if !value.eq_ignore_ascii_case("none") {
+                    identity_files.push(expand_home(&value));
+                }
+            },
             "proxyjump" if !value.eq_ignore_ascii_case("none") => {
-                proxy_jump = Some(value.to_owned());
+                proxy_jump = Some(value);
             },
             _ => {},
         }
@@ -345,7 +369,6 @@ fn parse_resolved_config(original: &str, text: &str) -> Option<SshDestination> {
         proxy_jump,
     })
 }
-
 fn find_ssh() -> PathBuf {
     if let Some(root) = std::env::var_os("SystemRoot") {
         let path = PathBuf::from(root).join("System32").join("OpenSSH").join("ssh.exe");
@@ -364,18 +387,28 @@ fn find_ssh() -> PathBuf {
 /// flash particularly visible. Other platforms keep the ordinary process
 /// flags.
 fn ssh_config_output(target: &str) -> io::Result<std::process::Output> {
+    ssh_config_command(target, crate::ssh::ssh_config_path().as_deref()).output()
+}
+
+fn ssh_config_command(target: &str, config: Option<&Path>) -> Command {
     let mut command = Command::new(find_ssh());
-    command.arg("-G").arg("--").arg(target);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt as _;
-        command.creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW);
+    // Use the same per-user config as the SSH host list, including portable
+    // Windows installs whose OpenSSH environment may differ from the shell.
+    if let Some(path) = config {
+        command.arg("-F").arg(path);
     }
-    command.output()
+    command.arg("-G").arg("--").arg(target);
+    crate::platform::process::hidden_command(&mut command);
+    command
 }
 
 fn expand_home(value: &str) -> PathBuf {
-    let value = value.trim_matches('"');
+    let value = value.trim_matches(|character| matches!(character, '"' | '\''));
+    if value == "~" {
+        if let Some(home) = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")) {
+            return PathBuf::from(home);
+        }
+    }
     if let Some(rest) = value.strip_prefix("~/").or_else(|| value.strip_prefix("~\\")) {
         if let Some(home) = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")) {
             return PathBuf::from(home).join(rest);
@@ -414,6 +447,31 @@ impl ClientHandler {
         }
         russh::keys::known_hosts::check_known_hosts(&self.host, self.port, key)
     }
+
+    async fn confirm_unknown_key(
+        &self,
+        key: &ssh_key::PublicKey,
+        confirmation: impl std::future::Future<Output = bool>,
+    ) -> bool {
+        if !self.allow_prompt || !self.handshake.confirm(confirmation).await {
+            return false;
+        }
+        let result = self.remember_host_key(key);
+        if let Err(error) = result {
+            warn!("Could not save trusted SSH host key: {error}");
+        }
+        true
+    }
+
+    fn remember_host_key(&self, key: &ssh_key::PublicKey) -> Result<(), russh::keys::Error> {
+        #[cfg(test)]
+        if let Some(path) = &self.known_hosts_path {
+            return russh::keys::known_hosts::learn_known_hosts_path(
+                &self.host, self.port, key, path,
+            );
+        }
+        russh::keys::known_hosts::learn_known_hosts(&self.host, self.port, key)
+    }
 }
 
 impl client::Handler for ClientHandler {
@@ -425,31 +483,17 @@ impl client::Handler for ClientHandler {
     ) -> Result<bool, Self::Error> {
         match self.verify_host_key(server_public_key) {
             Ok(true) => Ok(true),
-            Ok(false) => {
-                if self.allow_prompt
-                    && self
-                        .handshake
-                        .confirm(confirm_new_host(&self.host, self.port, server_public_key))
-                        .await
-                {
-                    if let Err(err) = russh::keys::known_hosts::learn_known_hosts(
-                        &self.host,
-                        self.port,
-                        server_public_key,
-                    ) {
-                        warn!("保存 SSH 主机密钥失败: {err}");
-                    }
-                    Ok(true)
-                } else {
-                    Ok(false)
-                }
-            },
+            Ok(false) => Ok(self
+                .confirm_unknown_key(
+                    server_public_key,
+                    confirm_new_host(&self.host, self.port, server_public_key),
+                )
+                .await),
             Err(err) => {
                 warn!("SSH 主机密钥验证失败: {err}");
-                if self.allow_prompt {
-                    show_host_key_changed(&self.host, self.port, &err.to_string());
-                }
-                Ok(false)
+                // Return the verification error to the terminal/test status. A blocking
+                // native message box here stalls the async handshake and hides the cause.
+                Err(err.into())
             },
         }
     }
@@ -545,7 +589,7 @@ async fn authenticated_session_at<H: SshEventHost>(
     depth: u8,
 ) -> Result<AcquiredSession, SessionError> {
     let route = resolve_connection_route(destination, profile, depth, None).await?;
-    authenticated_route(&route, progress, false).await
+    authenticated_route(&route, progress, false, true).await
 }
 
 async fn resolve_connection_route(
@@ -587,6 +631,7 @@ async fn authenticated_route<H: SshEventHost>(
     route: &ResolvedRoute,
     progress: Option<&H>,
     unattended: bool,
+    allow_host_key_prompt: bool,
 ) -> Result<AcquiredSession, SessionError> {
     let key = route.pool_key();
     let existing =
@@ -611,7 +656,7 @@ async fn authenticated_route<H: SshEventHost>(
         ..Default::default()
     });
     report_stage(progress, SshStage::Connect);
-    let mut transport = open_transport(route, config, unattended).await?;
+    let mut transport = open_transport(route, config, unattended, allow_host_key_prompt).await?;
     report_stage(progress, SshStage::Authenticate);
     if unattended {
         let request = SshTestRequest {
@@ -664,13 +709,14 @@ async fn open_transport(
     route: &ResolvedRoute,
     config: Arc<client::Config>,
     unattended: bool,
+    allow_host_key_prompt: bool,
 ) -> Result<OpenedTransport, SessionError> {
     let destination = &route.destination;
     let handshake = lifecycle::Handshake::default();
     let handler = ClientHandler {
         host: destination.host.clone(),
         port: destination.port,
-        allow_prompt: !unattended,
+        allow_prompt: allow_host_key_prompt,
         handshake: handshake.clone(),
         #[cfg(test)]
         known_hosts_path: route.known_hosts_path.clone(),
@@ -690,10 +736,14 @@ async fn open_transport(
         RouteTransport::Jump(jump) => {
             let spec = &jump.destination.original;
             info!("经跳板 {spec} 连接 {}:{}", destination.host, destination.port);
-            let acquired =
-                Box::pin(authenticated_route(jump, None::<&NoopSshEventHost>, unattended))
-                    .await
-                    .map_err(|err| format!("连接跳板 {spec} 失败: {err}"))?;
+            let acquired = Box::pin(authenticated_route(
+                jump,
+                None::<&NoopSshEventHost>,
+                unattended,
+                allow_host_key_prompt,
+            ))
+            .await
+            .map_err(|err| format!("连接跳板 {spec} 失败: {err}"))?;
             let channel = lifecycle::network(
                 "jump channel",
                 acquired.session.channel_open_direct_tcpip(
@@ -769,14 +819,26 @@ async fn authenticate(
     let mut stored_password_was_present = false;
     let mut interactive_prompt_was_shown = false;
     let mut local_key_errors = Vec::new();
+    let mut agent_attempt = None;
     for method in plan {
         match method {
             AuthMethod::PrivateKey(path) => {
+                if matches!(agent_attempt, Some(agent::Attempt::PartialSuccess { .. })) {
+                    continue;
+                }
                 if try_private_key(session, destination, &path, true, &mut local_key_errors).await?
                 {
                     clear_secret(&mut reusable_password);
                     return Ok(());
                 }
+            },
+            AuthMethod::Agent => {
+                let attempt =
+                    agent::authenticate(session, destination, &profile.private_keys).await?;
+                if attempt == agent::Attempt::Authenticated {
+                    return Ok(());
+                }
+                agent_attempt = Some(attempt);
             },
             AuthMethod::StoredPassword => {
                 if !loaded_stored_password {
@@ -847,7 +909,11 @@ async fn authenticate(
         }
     }
     clear_secret(&mut reusable_password);
-    Err(auth_failure(profile.auth, key_count, &local_key_errors).into())
+    Err(agent::with_diagnostic(
+        auth_failure(profile.auth, key_count, &local_key_errors),
+        agent_attempt.as_ref(),
+    )
+    .into())
 }
 
 /// 在目标主机上跑一条命令并收集它的标准输出，脚本经标准输入送入。
@@ -962,14 +1028,15 @@ pub struct SshTestResult {
     pub elapsed_ms: u64,
 }
 
-/// 执行一次无人值守的草稿测试。绝不弹 AskPass：草稿/已存密码可以回答明确的
-/// keyboard-interactive 密码问题，OTP 等真正需要用户参与的问题则留给正式连接
-/// （见 [`test_authenticate`]）。
+/// 执行一次草稿测试。认证不弹 AskPass：草稿/已存密码可以回答明确的
+/// keyboard-interactive 密码问题；未知主机密钥仍须用户在确认对话框中明确信任。
 async fn run_test(request: SshTestRequest) -> SshTestResult {
     let started = std::time::Instant::now();
     let request_id = request.request_id;
     let raw = request.destination.clone();
-    let outcome = tokio::time::timeout(TEST_TIMEOUT, async {
+    // Keep the short budget for local resolution; host-key confirmation is
+    // user driven and therefore intentionally outside it.
+    let route_outcome = tokio::time::timeout(TEST_TIMEOUT, async {
         let resolved = tokio::task::spawn_blocking({
             let raw = raw.clone();
             move || SshDestination::resolve(&raw)
@@ -989,11 +1056,14 @@ async fn run_test(request: SshTestRequest) -> SshTestResult {
         let route =
             resolve_connection_route(&resolved, &profile, 0, request.proxy_password.clone())
                 .await?;
-        test_connect(&route, &request).await
+        Ok::<_, SessionError>(route)
     })
     .await;
-    let (ok, message) = match outcome {
-        Ok(Ok(())) => (true, String::new()),
+    let (ok, message) = match route_outcome {
+        Ok(Ok(route)) => match test_connect(&route, &request).await {
+            Ok(()) => (true, String::new()),
+            Err(err) => (false, err.to_string()),
+        },
         Ok(Err(err)) => (false, err.to_string()),
         Err(_) => (false, format!("连接超时（{} 秒无响应）", TEST_TIMEOUT.as_secs())),
     };
@@ -1012,9 +1082,13 @@ async fn run_test(request: SshTestRequest) -> SshTestResult {
 pub fn start_test(
     request: SshTestRequest,
 ) -> io::Result<tokio::sync::oneshot::Receiver<SshTestResult>> {
-    let (sender, receiver) = tokio::sync::oneshot::channel();
+    let (mut sender, receiver) = tokio::sync::oneshot::channel();
     runtime()?.spawn(async move {
-        let _ = sender.send(run_test(request).await);
+        tokio::select! {
+            biased;
+            _ = sender.closed() => {},
+            result = run_test(request) => { let _ = sender.send(result); },
+        }
     });
     Ok(receiver)
 }
@@ -1244,12 +1318,12 @@ async fn proxy_test_stream(
                 target: spec.clone(),
                 error: error.to_string(),
             })?;
-            let jump = authenticated_route(&route, None::<&NoopSshEventHost>, true).await.map_err(
-                |error| ProxyTestFailure::JumpConnect {
+            let jump = authenticated_route(&route, None::<&NoopSshEventHost>, true, false)
+                .await
+                .map_err(|error| ProxyTestFailure::JumpConnect {
                     target: spec.clone(),
                     error: error.to_string(),
-                },
-            )?;
+                })?;
             let channel = jump
                 .session
                 .channel_open_direct_tcpip(
@@ -1284,11 +1358,11 @@ async fn test_connect(route: &ResolvedRoute, request: &SshTestRequest) -> Result
         keepalive_max: 3,
         ..Default::default()
     });
-    let mut transport = open_transport(route, config, true).await?;
+    let mut transport = open_transport(route, config, true, true).await?;
     test_authenticate(&mut transport.session, &route.destination, request).await
 }
 
-/// 无人值守版认证：none → 草稿密码 → 密钥/已存密码计划。明确的
+/// 无人值守版认证沿用正式连接的计划；草稿密码只替代其中的保存密码。明确的
 /// keyboard-interactive 密码问题可以复用已有密码；OTP 与「连接时询问」在这里
 /// 跳过——测试不能弹框，也不能把真实的二次验证误报成配置错误。
 async fn test_authenticate(
@@ -1296,26 +1370,45 @@ async fn test_authenticate(
     destination: &SshDestination,
     request: &SshTestRequest,
 ) -> Result<(), SessionError> {
+    let mut using_agent = false;
+    match tokio::time::timeout(
+        TEST_TIMEOUT,
+        test_authentication_plan(session, destination, request, &mut using_agent),
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(_) if using_agent => Err(agent::timed_out()),
+        Err(_) => Err(format!("认证超时（{} 秒无响应）", TEST_TIMEOUT.as_secs()).into()),
+    }
+}
+
+async fn test_authentication_plan(
+    session: &mut ClientSession,
+    destination: &SshDestination,
+    request: &SshTestRequest,
+    using_agent: &mut bool,
+) -> Result<(), SessionError> {
     if session.authenticate_none(&destination.user).await?.success() {
         return Ok(());
     }
     let has_draft_password =
         request.password.as_deref().is_some_and(|password| !password.is_empty());
-    if let Some(password) = request.password.as_deref().filter(|p| !p.is_empty()) {
-        if authenticate_password(session, &destination.user, password.as_bytes()).await? {
-            return Ok(());
-        }
-    }
     let plan =
         authentication_plan(request.auth, &request.private_keys, &destination.identity_files);
     let mut interactive_skipped = false;
     let mut stored_password = None;
     let mut loaded_stored_password = false;
     let mut local_key_errors = Vec::new();
-    let mut credential_was_attempted = has_draft_password;
+    let mut credential_was_attempted = false;
+    let mut agent_attempt = None;
     for method in plan {
+        *using_agent = matches!(method, AuthMethod::Agent);
         match method {
             AuthMethod::PrivateKey(path) => {
+                if matches!(agent_attempt, Some(agent::Attempt::PartialSuccess { .. })) {
+                    continue;
+                }
                 // allow_prompt=false：spawn_test 承诺绝不弹框，密钥口令也
                 // 不例外——受口令保护且无已存口令的密钥记为本地问题。
                 if try_private_key(session, destination, &path, false, &mut local_key_errors)
@@ -1325,11 +1418,26 @@ async fn test_authenticate(
                     return Ok(());
                 }
             },
+            AuthMethod::Agent => {
+                let attempt =
+                    agent::authenticate(session, destination, &request.private_keys).await?;
+                if attempt == agent::Attempt::Authenticated {
+                    return Ok(());
+                }
+                agent_attempt = Some(attempt);
+            },
             AuthMethod::StoredPassword => {
                 // A non-empty draft is the user's explicit answer for this
                 // test. Do not let an older credential-manager value turn a
                 // wrong draft into a misleading success.
                 if has_draft_password {
+                    credential_was_attempted = true;
+                    let password = request.password.as_deref().unwrap_or_default();
+                    if authenticate_password(session, &destination.user, password.as_bytes())
+                        .await?
+                    {
+                        return Ok(());
+                    }
                     continue;
                 }
                 if !loaded_stored_password {
@@ -1369,13 +1477,14 @@ async fn test_authenticate(
         }
     }
     clear_secret(&mut stored_password);
-    if !local_key_errors.is_empty() {
-        return Err(format!("私钥无法使用：{}", local_key_errors.join("；")).into());
-    }
-    if interactive_skipped {
-        return Err("服务器可达，但此配置需要连接时交互输入（密码/MFA），测试无法替你完成".into());
-    }
-    Err("认证未通过：请检查密码、私钥或服务器端授权".into())
+    let message = if !local_key_errors.is_empty() {
+        format!("私钥无法使用：{}", local_key_errors.join("；"))
+    } else if interactive_skipped {
+        "服务器可达，但此配置需要连接时交互输入（密码/MFA），测试无法替你完成".into()
+    } else {
+        "认证未通过：请检查密码、私钥或服务器端授权".into()
+    };
+    Err(agent::with_diagnostic(message, agent_attempt.as_ref()).into())
 }
 
 fn auth_failure(
@@ -1680,11 +1789,6 @@ fn confirm_new_host_legacy(host: &str, port: u16, _key: &ssh_key::PublicKey) -> 
     false
 }
 
-#[cfg(not(windows))]
-fn show_host_key_changed(host: &str, port: u16, detail: &str) {
-    log::error!("{host}:{port} 的主机密钥与已保存记录不一致，连接已终止: {detail}");
-}
-
 #[cfg(windows)]
 fn confirm_new_host_legacy(host: &str, port: u16, key: &ssh_key::PublicKey) -> bool {
     use std::ptr::null_mut;
@@ -1704,26 +1808,6 @@ fn confirm_new_host_legacy(host: &str, port: u16, key: &ssh_key::PublicKey) -> b
             title.as_ptr(),
             MB_YESNO | MB_ICONQUESTION | MB_SETFOREGROUND,
         ) == IDYES
-    }
-}
-
-#[cfg(windows)]
-fn show_host_key_changed(host: &str, port: u16, detail: &str) {
-    use std::ptr::null_mut;
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        MB_ICONERROR, MB_OK, MB_SETFOREGROUND, MessageBoxW,
-    };
-    let text = wide(&format!(
-        "{host}:{port} 的主机密钥与已保存记录不一致。\n\n连接已终止，以避免连接到错误的主机。\n\n{detail}"
-    ));
-    let title = wide("Nebula SSH");
-    unsafe {
-        MessageBoxW(
-            null_mut(),
-            text.as_ptr(),
-            title.as_ptr(),
-            MB_OK | MB_ICONERROR | MB_SETFOREGROUND,
-        );
     }
 }
 
