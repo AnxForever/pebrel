@@ -31,12 +31,19 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::platform::{Platform, local_paths};
+
 /// Decode a file URI or local path into a native filesystem PathBuf.
 ///
 /// Returns `None` when the input is not a local file path or recognized `file:`
 /// URI (allowing the caller to fall back to the default web browser handler).
 pub fn file_uri_to_local_path(uri: &str) -> Option<PathBuf> {
-    file_uri_to_local_path_with(uri, |drive| drive_exists(drive), home::home_dir, cfg!(windows))
+    file_uri_to_local_path_with(
+        uri,
+        local_paths::drive_exists,
+        home::home_dir,
+        Platform::current() == Platform::Windows,
+    )
 }
 
 /// Open a local path (file or directory) using the platform's default handler.
@@ -510,43 +517,7 @@ fn host_is_local(host: &str) -> bool {
     if host == "127.0.0.1" || host == "::1" || host == "[::1]" {
         return true;
     }
-    #[cfg(windows)]
-    if let Ok(name) = std::env::var("COMPUTERNAME") {
-        if name.eq_ignore_ascii_case(host) {
-            return true;
-        }
-    }
-    #[cfg(unix)]
-    {
-        if let Ok(name) = std::env::var("HOSTNAME") {
-            if name.eq_ignore_ascii_case(host) {
-                return true;
-            }
-        }
-        if let Ok(name) = std::env::var("HOST") {
-            if name.eq_ignore_ascii_case(host) {
-                return true;
-            }
-        }
-        if let Some(name) = sys_gethostname() {
-            if name.eq_ignore_ascii_case(host) {
-                return true;
-            }
-        }
-    }
-    false
-}
-
-#[cfg(unix)]
-fn sys_gethostname() -> Option<String> {
-    unsafe {
-        let mut buf = [0 as std::ffi::c_char; 256];
-        if libc::gethostname(buf.as_mut_ptr(), buf.len()) == 0 {
-            std::ffi::CStr::from_ptr(buf.as_ptr()).to_str().ok().map(|s| s.to_string())
-        } else {
-            None
-        }
-    }
+    local_paths::matches_hostname(host)
 }
 
 /// Convert a decoded, local, posix-looking URI path into a platform-appropriate PathBuf.
@@ -651,17 +622,6 @@ fn to_windows(path: &str) -> PathBuf {
         out[..1].make_ascii_uppercase();
     }
     PathBuf::from(out)
-}
-
-/// Whether drive `letter` (e.g. `'C'`) is currently mounted.
-#[cfg(windows)]
-fn drive_exists(letter: char) -> bool {
-    std::path::Path::new(&format!("{letter}:\\")).exists()
-}
-
-#[cfg(not(windows))]
-fn drive_exists(_letter: char) -> bool {
-    false
 }
 
 /// UTF-8 aware percent-decoding.
@@ -1013,14 +973,11 @@ mod tests {
         assert_eq!(t_unix("//cdn.example.com/lib.js"), None);
 
         // Gate 5: Single-slash file:/ is recognized as local URI on both platforms
-        #[cfg(windows)]
-        let file_single = "file:/C:/nonexistent_file_test/file.txt";
-        #[cfg(not(windows))]
-        let file_single = "file:/home/nonexistent_file_test/file.txt";
-        assert!(matches!(
-            classify_link_target(file_single),
-            LinkTargetKind::LocalMissing(_) | LinkTargetKind::LocalExisting(_)
-        ));
+        let directory = tempfile::tempdir().unwrap();
+        let missing = directory.path().join("missing.txt");
+        let native = missing.to_string_lossy().replace('\\', "/");
+        let file_single = format!("file:/{}", native.trim_start_matches('/'));
+        assert_eq!(classify_link_target(&file_single), LinkTargetKind::LocalMissing(missing));
         assert_eq!(t_unix("file:/home/user/whatever"), Some("/home/user/whatever".into()));
         assert_eq!(t_win("file:/C:/test.txt"), Some(r"C:\test.txt".into()));
 

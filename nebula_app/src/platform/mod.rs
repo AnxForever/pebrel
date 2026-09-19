@@ -24,6 +24,7 @@ pub(crate) mod file_preview;
 pub mod fonts;
 #[cfg(all(windows, feature = "gpui-shell"))]
 pub(crate) mod keyboard;
+pub(crate) mod local_paths;
 pub mod notifications;
 pub(crate) mod pi_session;
 pub(crate) mod process;
