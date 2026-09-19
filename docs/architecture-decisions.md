@@ -1,5 +1,11 @@
 # Architecture decisions / 架构决策记录
 
+> Historical consolidated archive. New non-trivial decisions after the 2026-09-19
+> governance migration live under the owning path in
+> [`architecture/notes/`](../architecture/notes/AGENTS.md). Existing ADRs keep their
+> accepted rationale; a replacement creates a new note with `Supersedes` rather than
+> rewriting the old conclusion.
+
 ## Process
 
 Record decisions that change dependency direction, core ownership, persistent
@@ -12,6 +18,8 @@ Revisit condition.** Identify the accountable maintainer in the PR review. A pol
 change must include a failing legitimate example when correcting a false positive,
 plus a violation that must remain rejected. Do not use a policy edit to conceal an
 unrelated feature's growth. Remote approval/enforcement is not implied by this log.
+The note location and supersession rules above replace only this section's former
+single-file storage process; the records below remain unchanged historical context.
 
 ## ADR-0001 — Evidence-based architecture contracts
 
@@ -756,170 +764,3 @@ settings files.
   tests; a successful compile is not visual acceptance.
 - **Revisit condition:** Reconsider schema versioning if preserving organization
   through edits by older application versions becomes a supported requirement.
-
-## ADR-0021 — Agent activity authority and terminal input compatibility
-
-- **Status:** Implemented in the working tree, 2026-09-19; pending repository
-  review. This record does not claim a release or live-client acceptance.
-- **Context:** Two UI shells independently combined hook facts, screen words,
-  command boundaries, process snapshots and terminal progress. Old output could
-  replace a completed turn with attention, and command completion could leave
-  progress or Agent state running. Modifier-preserving Windows key records also
-  behave differently for native console readers and byte-stream readers.
-- **Evidence:** The reported Codex screen contains TOML strings `[y/n]` above a
-  current `esc to interrupt` footer. The Windows ConPTY probe receives CR from
-  Shift+VK_RETURN even when its UnicodeChar is LF, while native ReadKey retains
-  Shift. LF compatibility and negotiated CSI-u CSI-u both survive that transport.
-- **Decision:** `ai_hook::lifecycle::AgentActivity` owns each pane's Agent state,
-  primary process/session, input barrier and fallback authority. UI adapters
-  validate routing/ownership, run the shared ordering gate, apply an event, then
-  project status and notification effects. Rejected observations must not mutate
-  the ordering gate. `protocol`/`payload` normalize bounded provider data;
-  `ordering` owns replay/late-event filtering; Windows transport, repair scheduling,
-  Codex notify editing and managed skills keep their separate I/O lifecycles.
-- **Capability contract:** Starts/completions, attention events, attention context,
-  background tasks and delivery ordering are separate capabilities of the bridge
-  we install. Claude/OpenCode use lifecycle and attention hooks; Pi owns turns but
-  may need screen evidence of a live input form during a turn. Codex keeps legacy
-  completion-only notify alongside versioned native hooks: clients advertising
-  hooks use the three-event turn contract; 0.154.0 and newer use the locally
-  verified lifecycle/permission contract. A narrowly matched PreToolUse for the
-  structured request_user_input tool supplies questions; ordinary tool prose has no attention
-  authority. PostToolUse resumes work after either permission or a question.
-  The bridge declares its installed contract in the envelope. A native event
-  without that declaration is rejected;
-  observing a real native event suppresses notify duplicates for that session.
-  Explicit feature opt-outs and Codex's own hook trust review remain authoritative.
-  Untyped legacy notifications
-  can request attention during work, but cannot reopen an idle or completed turn.
-- **Fallback boundaries:** Only capabilities absent from the active bridge may
-  consume screen observations. Blocking matches require current controls near
-  the input region; output words alone are insufficient. Shell completion clears
-  foreground identity, Agent state and progress together. SSH uses OSC 133 or a
-  pending command's known empty prompt, never silence, BEL or host-process absence.
-  Local snapshots retain errors as unknown and cannot finish shell builtins merely
-  because there are no children. Close-warning exemptions are not activity rules.
-- **Input boundary:** `input::terminal_input` owns the newline compatibility
-  decision shared by GPUI, legacy input and Runtime API. Negotiated CSI-u takes
-  precedence; unnegotiated Claude uses LF; native Windows clients retain Win32
-  identity and modifiers. Modified Enter never submits a shell-history entry.
-- **Alternatives:** More per-view flags or additional loose keywords keep the
-  conflicting authorities. Treating every provider as a full-hook provider loses
-  legitimate input requests; letting every screen override hooks reintroduces
-  false attention/completion. Globally substituting LF loses native key identity.
-- **SSH installation boundary:** `ai_hook::remote` plans edits using shared JSON
-  ownership, Codex feature and notify policies. `ssh_session::integration` executes
-  the bounded Python file adapter on an existing authenticated connection, then
-  starts the integrated shell on its own PTY. The per-channel token is passed at
-  startup, never written into remote files and never dependent on AcceptEnv.
-  Unsupported/rejected setup falls back to an ordinary SSH shell; rejection of
-  the integrated exec opens a fresh channel. Remote process identity is PID plus
-  start epoch, separate from host PIDs. Same-process SessionStart permits clear/
-  resume transitions; subagent contexts, foreign processes and late sessions are
-  rejected before ordering. Compaction preserves the current turn state.
-- **Ownership and removal:** A versioned remote manifest records exact hook groups,
-  notify chaining and managed asset hashes. Compare-and-swap writes, a setup lock
-  and rollback protect concurrent edits; user edits cause a conflict rather than
-  replacement. Explicit removal restores owned settings and persists a remote
-  opt-out. `setup-ai --ssh DESTINATION [--remove]` uses that same planner. Python
-  3.8+ and POSIX filesystem/TTY support are required. Bash replays login startup
-  and sources user rc once; it remains an rcfile shell (Bash cannot set its
-  read-only login_shell flag). Zsh retains its existing startup wrappers.
-  Other shells receive the Agent hook environment without a claimed OSC 133
-  implementation. No remote Codex hook trust database is edited.
-- **Cost and compatibility:** No new crate or long-lived worker. Windows native
-  hooks add an ownership receipt; SSH adds the remote manifest and opt-out above.
-  Short-lived remote hook processes serialize writes per terminal and allocate
-  sequence numbers per Agent process. Counter/lock files are capped, old entries
-  expire, and input, output and execution time have explicit budgets.
-  Existing bounded event caches and process-probe throttling remain. OpenCode's
-  sender retains at most 512 session turn records so a permission pause or nested
-  session cannot consume another session's pending completion. Complete-hook
-  sessions skip screen classification; partial bridges scan only the existing
-  bounded terminal tail. Managed integration files retain ownership checks,
-  edited-file preservation and reversible removal; historical fixtures are exact
-  bytes from v1.5.0, protected from Git newline conversion and verified by actual
-  checkouts under all three autocrlf settings.
-- **Validation:** Shared lifecycle and provider parsing tests, current/expired form
-  fixtures, GPUI key-to-PTY and command/progress tests, both feature configurations,
-  architecture ratcheting and the native transport probe. New regressions cover
-  native/notify coexistence, turn/session isolation, installation conflicts and
-  removal, SSH exec fallback without AcceptEnv, token routing, real controlling
-  TTY delivery, prompt-command arrays/export/readonly/reload and rollback. Keep
-  live authenticated model turns separate from protocol/transport acceptance.
-- **Revisit condition:** Extend the conservative Codex version contract only with
-  upstream and execution evidence. Remove the Claude fallback once supported
-  clients negotiate the keyboard protocol here. A missing remote process identity
-  still cannot authorize a session switch based on cwd or screen text.
-
-## ADR-0022 — System SSH agent authentication and transport ownership
-
-- **Status:** Implemented, 2026-09-19; pending repository review. This record does
-  not claim a release or acceptance with every third-party credential manager.
-- **Context:** Auto authentication had no system-agent step, so a host whose key
-  existed only in an agent failed both connection entry points. Legacy `agent`
-  profiles still decoded as Auto but had lost their authentication capability.
-  Reintroducing platform APIs without compile-time guards would repeat a
-  cross-platform build defect. Treating a signer failure as ordinary rejection
-  can leave the underlying SSH task waiting for a signature indefinitely.
-- **Policy authority:** `ssh_session::authentication_plan` continues to own the
-  order shared by formal and test connections: explicit disk keys, system agent,
-  resolved/default disk keys, saved password, keyboard-interactive, then a password
-  prompt. Key path deduplication spans both disk-key groups. A nonempty draft
-  password replaces the saved-password step in Test Connection; it cannot bypass
-  the selected authentication mode. Password mode retains password/PAM only,
-  PublicKey retains disk keys only, and KeyboardInteractive retains that method
-  only. The legacy profile migration remains unchanged.
-- **Agent boundary:** `ssh_session::agent` owns the total discovery budget, public
-  identity selectors, signing and structured results. `platform::ssh_agent` owns
-  native endpoint selection, connection and bounded identity enumeration. Its
-  adapter returns protocol streams and identities without depending on the SSH
-  policy module. Windows tries the standard OpenSSH
-  pipe and then Pageant; Unix uses `SSH_AUTH_SOCK`. Platform methods are compiled
-  only for their target, with no endpoints on other targets. Existing russh
-  support supplies the protocol, dynamic stream, public keys, certificates and
-  RSA SHA-256/SHA-512 signatures. There is no new dependency, persisted setting,
-  credential store, worker, authentication mode or agent forwarding.
-- **Identity scope:** Every host, including a jump host, opens its own agent
-  connection and ranks identities using that host's public selectors. Explicit
-  selectors precede resolved selectors; other identities retain their returned
-  order. Public-key comments do not affect equality; certificate selectors match
-  their underlying public key. No private material is loaded by this module.
-  Duplicate identity blobs are offered only once across endpoints, while a
-  certificate remains distinct from its raw key. There is no unexplained identity
-  cutoff; logs and final diagnostics report returned and offered counts. A server
-  that stops offering public-key authentication ends the agent step. Partial
-  success skips further public keys and continues to the second factor.
-- **Budgets:** Async connection and identity enumeration share a deadline of
-  1.5 seconds per endpoint and 3 seconds in total. Public selector reads have a separate 1 second
-  budget and 64 KiB per regular file. Signing may need user confirmation, so it
-  uses the existing 300 second formal authentication budget. Confirmation time
-  does not consume a later endpoint's discovery allowance. Test Connection and
-  unattended jump authentication retain a 12 second authentication limit, with
-  an agent-specific diagnostic if it expires during that step.
-- **Native cancellation limit:** The locked Pageant 0.2.1 window-message transport
-  calls synchronous `SendMessageA` from an async worker. A caller deadline cannot
-  preempt that native call or reclaim a worker blocked by an unresponsive legacy
-  provider. The named-pipe busy case is cancellable and separately tested. A
-  stronger guarantee for the legacy transport requires an upstream or native
-  adapter change; protocol timeout tests alone do not establish that guarantee.
-- **Failure and cancellation:** Unavailable, empty and rejected agents are safe
-  fallback results; partial success and authenticated are separate outcomes.
-  Signer, session-channel and signing-timeout errors propagate immediately. The
-  caller drops its unpooled transport on error or cancellation. It must not send
-  a password, change agents or merely enqueue Disconnect on a transport that
-  may still be waiting for Signed. Only fully authenticated handles enter the
-  pool; an already authenticated jump connection keeps its own lifetime.
-- **Validation:** Tests use generated keys, an isolated agent wire service and
-  real loopback SSH servers. They cover both entry points, legacy migration,
-  strict modes, disk-key order, fallback, discovery timeout, signer refusal and
-  disconnect, signing timeout and cancellation, transport closure, certificates,
-  both RSA hashes, selectors and independent jump/target identities. Native
-  adapter fixtures use private pipe/socket names; the Unix environment test runs
-  in a child process so parallel tests cannot change each other's agent. No test
-  enumerates a user's real credentials. Platform compilation and native fixture
-  results must be reported separately from live credential-manager acceptance.
-- **Revisit condition:** Custom IdentityAgent, IdentitiesOnly and agent forwarding
-  need their own explicit policies and tests. They are not implicitly enabled by
-  restoring Auto authentication. Reconsider identity attempt selection with
-  server-limit evidence; do not silently reintroduce a fixed truncation.

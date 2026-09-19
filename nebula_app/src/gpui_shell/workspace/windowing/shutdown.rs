@@ -1,4 +1,6 @@
 //! Application shutdown: approve drafts, capture durable state, then stop PTYs.
+use gpui::SharedString;
+
 use super::*;
 use crate::i18n::Message;
 
