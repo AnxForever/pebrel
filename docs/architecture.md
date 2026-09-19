@@ -25,6 +25,9 @@ to rename all existing directories or create abstract interfaces everywhere.
 | `nebula_app/src/i18n` | Static lookup, locale resolution and formatting | Runtime catalog parsing or UI ownership |
 | `nebula_app/src/math` | Parse, validate, layout, compile and cache responsibilities | A duplicated per-shell math engine |
 | `nebula_app/src/platform` | Explicit platform capabilities and native adapters | A dumping ground for unrelated logic |
+| `nebula_app/src/ai_hook` | Normalized provider facts, bounded ordering, one shared pane lifecycle and owned installation policy; Windows adapters | Screen keyword rules or a separate state machine per UI shell |
+| `nebula_app/src/ssh_session/integration.rs` | Authenticated exec/PTY orchestration for remote hook installation and shell startup | Provider policy or a second Agent state machine |
+| `nebula_app/src/ai_agents` | Agent identity and structurally constrained screen observations | Authority to overwrite hook results or infer remote completion from silence |
 | `nebula_app/src/gpui_shell` | GPUI views, UI state, commands and subscriptions | A second settings/domain implementation |
 | `nebula_app/src/product_ui` | Feature-selected shared presentation facade | A route to legacy rendering dependencies |
 | `nebula_app/src/display`, `renderer` | Legacy rendering and still-shared extracted models | A source of new undifferentiated functionality |

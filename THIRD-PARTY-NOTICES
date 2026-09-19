@@ -21,6 +21,12 @@ The embedded Latin Modern Math font is distributed under the GUST Font
 License 1.0. Its complete license text is included as
 licenses/LICENSE-LATIN-MODERN-MATH.
 
+The SSH Bash login-startup replay in nebula_app/res/shell/bashrc adapts
+the source-observation startup logic by l0ng-ai (revision 4da3868,
+shell_integration.rs).
+Copyright 2026 l0ng-ai, Apache License 2.0 (full text below). Pebrel's
+adaptation uses its own shell lifecycle markers and guarded prompt hooks.
+
 The Windows installed-shell detection (registry lookup order and the
 shell brand icon artwork) derives from Tabby (github.com/Eugeny/tabby),
 distributed under the MIT License, whose text is reproduced below.

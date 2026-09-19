@@ -756,3 +756,98 @@ settings files.
   tests; a successful compile is not visual acceptance.
 - **Revisit condition:** Reconsider schema versioning if preserving organization
   through edits by older application versions becomes a supported requirement.
+
+## ADR-0021 — Agent activity authority and terminal input compatibility
+
+- **Status:** Implemented in the working tree, 2026-09-19; pending repository
+  review. This record does not claim a release or live-client acceptance.
+- **Context:** Two UI shells independently combined hook facts, screen words,
+  command boundaries, process snapshots and terminal progress. Old output could
+  replace a completed turn with attention, and command completion could leave
+  progress or Agent state running. Modifier-preserving Windows key records also
+  behave differently for native console readers and byte-stream readers.
+- **Evidence:** The reported Codex screen contains TOML strings `[y/n]` above a
+  current `esc to interrupt` footer. The Windows ConPTY probe receives CR from
+  Shift+VK_RETURN even when its UnicodeChar is LF, while native ReadKey retains
+  Shift. LF compatibility and negotiated CSI-u CSI-u both survive that transport.
+- **Decision:** `ai_hook::lifecycle::AgentActivity` owns each pane's Agent state,
+  primary process/session, input barrier and fallback authority. UI adapters
+  validate routing/ownership, run the shared ordering gate, apply an event, then
+  project status and notification effects. Rejected observations must not mutate
+  the ordering gate. `protocol`/`payload` normalize bounded provider data;
+  `ordering` owns replay/late-event filtering; Windows transport, repair scheduling,
+  Codex notify editing and managed skills keep their separate I/O lifecycles.
+- **Capability contract:** Starts/completions, attention events, attention context,
+  background tasks and delivery ordering are separate capabilities of the bridge
+  we install. Claude/OpenCode use lifecycle and attention hooks; Pi owns turns but
+  may need screen evidence of a live input form during a turn. Codex keeps legacy
+  completion-only notify alongside versioned native hooks: clients advertising
+  hooks use the three-event turn contract; 0.154.0 and newer use the locally
+  verified lifecycle/permission contract. A narrowly matched PreToolUse for the
+  structured request_user_input tool supplies questions; ordinary tool prose has no attention
+  authority. PostToolUse resumes work after either permission or a question.
+  The bridge declares its installed contract in the envelope. A native event
+  without that declaration is rejected;
+  observing a real native event suppresses notify duplicates for that session.
+  Explicit feature opt-outs and Codex's own hook trust review remain authoritative.
+  Untyped legacy notifications
+  can request attention during work, but cannot reopen an idle or completed turn.
+- **Fallback boundaries:** Only capabilities absent from the active bridge may
+  consume screen observations. Blocking matches require current controls near
+  the input region; output words alone are insufficient. Shell completion clears
+  foreground identity, Agent state and progress together. SSH uses OSC 133 or a
+  pending command's known empty prompt, never silence, BEL or host-process absence.
+  Local snapshots retain errors as unknown and cannot finish shell builtins merely
+  because there are no children. Close-warning exemptions are not activity rules.
+- **Input boundary:** `input::terminal_input` owns the newline compatibility
+  decision shared by GPUI, legacy input and Runtime API. Negotiated CSI-u takes
+  precedence; unnegotiated Claude uses LF; native Windows clients retain Win32
+  identity and modifiers. Modified Enter never submits a shell-history entry.
+- **Alternatives:** More per-view flags or additional loose keywords keep the
+  conflicting authorities. Treating every provider as a full-hook provider loses
+  legitimate input requests; letting every screen override hooks reintroduces
+  false attention/completion. Globally substituting LF loses native key identity.
+- **SSH installation boundary:** `ai_hook::remote` plans edits using shared JSON
+  ownership, Codex feature and notify policies. `ssh_session::integration` executes
+  the bounded Python file adapter on an existing authenticated connection, then
+  starts the integrated shell on its own PTY. The per-channel token is passed at
+  startup, never written into remote files and never dependent on AcceptEnv.
+  Unsupported/rejected setup falls back to an ordinary SSH shell; rejection of
+  the integrated exec opens a fresh channel. Remote process identity is PID plus
+  start epoch, separate from host PIDs. Same-process SessionStart permits clear/
+  resume transitions; subagent contexts, foreign processes and late sessions are
+  rejected before ordering. Compaction preserves the current turn state.
+- **Ownership and removal:** A versioned remote manifest records exact hook groups,
+  notify chaining and managed asset hashes. Compare-and-swap writes, a setup lock
+  and rollback protect concurrent edits; user edits cause a conflict rather than
+  replacement. Explicit removal restores owned settings and persists a remote
+  opt-out. `setup-ai --ssh DESTINATION [--remove]` uses that same planner. Python
+  3.8+ and POSIX filesystem/TTY support are required. Bash replays login startup
+  and sources user rc once; it remains an rcfile shell (Bash cannot set its
+  read-only login_shell flag). Zsh retains its existing startup wrappers.
+  Other shells receive the Agent hook environment without a claimed OSC 133
+  implementation. No remote Codex hook trust database is edited.
+- **Cost and compatibility:** No new crate or long-lived worker. Windows native
+  hooks add an ownership receipt; SSH adds the remote manifest and opt-out above.
+  Short-lived remote hook processes serialize writes per terminal and allocate
+  sequence numbers per Agent process. Counter/lock files are capped, old entries
+  expire, and input, output and execution time have explicit budgets.
+  Existing bounded event caches and process-probe throttling remain. OpenCode's
+  sender retains at most 512 session turn records so a permission pause or nested
+  session cannot consume another session's pending completion. Complete-hook
+  sessions skip screen classification; partial bridges scan only the existing
+  bounded terminal tail. Managed integration files retain ownership checks,
+  edited-file preservation and reversible removal; historical fixtures are exact
+  bytes from v1.5.0, protected from Git newline conversion and verified by actual
+  checkouts under all three autocrlf settings.
+- **Validation:** Shared lifecycle and provider parsing tests, current/expired form
+  fixtures, GPUI key-to-PTY and command/progress tests, both feature configurations,
+  architecture ratcheting and the native transport probe. New regressions cover
+  native/notify coexistence, turn/session isolation, installation conflicts and
+  removal, SSH exec fallback without AcceptEnv, token routing, real controlling
+  TTY delivery, prompt-command arrays/export/readonly/reload and rollback. Keep
+  live authenticated model turns separate from protocol/transport acceptance.
+- **Revisit condition:** Extend the conservative Codex version contract only with
+  upstream and execution evidence. Remove the Claude fallback once supported
+  clients negotiate the keyboard protocol here. A missing remote process identity
+  still cannot authorize a session switch based on cwd or screen text.
