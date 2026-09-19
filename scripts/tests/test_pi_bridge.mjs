@@ -7,9 +7,10 @@ import { fileURLToPath } from 'node:url';
 import { test, after } from 'node:test';
 
 const root = new URL('../../', import.meta.url);
-const rust = readFileSync(new URL('nebula_app/src/ai_hook/win.rs', root), 'utf8');
-const embedded = rust.match(/const PI_EXTENSION_TS: &str = r#"([\s\S]*?)"#;/)?.[1];
-assert.ok(embedded, 'use the actual generated bridge');
+const bridgeSource = new URL('nebula_app/src/ai_hook/bridges.rs', root);
+const bridgePath = readFileSync(bridgeSource, 'utf8').match(/PI_EXTENSION_TS: &str = include_str!\("([^"]+)"\)/)?.[1];
+assert.ok(bridgePath, 'test must execute the production PI_EXTENSION_TS asset');
+const embedded = readFileSync(new URL(bridgePath, bridgeSource), 'utf8');
 const events = [];
 globalThis.__pebrelBridgeSpawn = (_hook, args) => {
   events.push(JSON.parse(args[1]));
@@ -74,8 +75,8 @@ test('a retryable failed attempt must not report successful completion', async (
   }
 });
 
-for (const [reason, outcome] of [['stop', 'success'], ['error', 'failed'], ['aborted', 'cancelled'], ['future', 'unknown']]) {
-  test(`settled ${reason} reports ${outcome} once, without leaking error text`, async () => {
+for (const reason of ['stop', 'error', 'aborted', 'future', 'length', 'toolUse']) {
+  test(`settled ${reason} reports its stop_reason once, without leaking error text`, async () => {
     const previous = process.env.PEBREL_HOOK_EXE;
     process.env.PEBREL_HOOK_EXE = 'test-hook';
     const firstEvent = events.length;
@@ -92,7 +93,8 @@ for (const [reason, outcome] of [['stop', 'success'], ['error', 'failed'], ['abo
       await callbacks.get('agent_settled')({}, ctx);
       await callbacks.get('agent_settled')({}, ctx);
       assert.deepEqual(events.slice(firstEvent).map(event => event.kind), ['prompt', 'done']);
-      assert.equal(events.at(-1).outcome, outcome);
+      assert.equal(events.at(-1).stop_reason, reason);
+      assert.equal('outcome' in events.at(-1), false);
       assert.ok(!JSON.stringify(events.slice(firstEvent)).includes('SECRET'));
     } finally {
       events.splice(firstEvent);
@@ -116,7 +118,7 @@ test('retry success replaces the failed attempt; switching sessions drops unfini
     await callbacks.get('agent_end')({ messages: [{ role: 'assistant', stopReason: 'stop' }] }, ctx);
     await callbacks.get('agent_settled')({}, ctx);
     assert.equal(events.slice(firstEvent).filter(event => event.kind === 'done').length, 1);
-    assert.equal(events.at(-1).outcome, 'success');
+    assert.equal(events.at(-1).stop_reason, 'stop');
     await callbacks.get('agent_start')({}, ctx);
     await callbacks.get('agent_end')({ messages: [{ role: 'assistant', stopReason: 'error' }] }, ctx);
     await callbacks.get('session_start')({}, context('new-session'));
@@ -144,7 +146,31 @@ test('pre-settled Pi versions retain agent_end fallback without registering unsu
     await callbacks.get('agent_start')({}, ctx);
     await callbacks.get('agent_end')({ messages: [{ role: 'assistant', stopReason: 'stop' }] }, ctx);
     assert.deepEqual(events.slice(firstEvent).map(event => event.kind), ['prompt', 'done']);
-    assert.equal(events.at(-1).outcome, 'success');
+    assert.equal(events.at(-1).stop_reason, 'stop');
+  } finally {
+    events.splice(firstEvent);
+    if (previous === undefined) delete process.env.PEBREL_HOOK_EXE;
+    else process.env.PEBREL_HOOK_EXE = previous;
+  }
+});
+
+test('shutdown discards pending completion and a new turn cannot reuse an old result', async () => {
+  const previous = process.env.PEBREL_HOOK_EXE;
+  process.env.PEBREL_HOOK_EXE = 'test-hook';
+  const firstEvent = events.length;
+  try {
+    const callbacks = new Map();
+    bridge.default({ on: (kind, callback) => callbacks.set(kind, callback) });
+    const ctx = context('shutdown');
+    await callbacks.get('agent_start')({}, ctx);
+    await callbacks.get('agent_end')({ messages: [{ role: 'assistant', stopReason: 'error' }] }, ctx);
+    await callbacks.get('session_shutdown')({}, ctx);
+    await callbacks.get('agent_settled')({}, ctx);
+    assert.deepEqual(events.slice(firstEvent).map(event => event.kind), ['prompt', 'session-end']);
+    await callbacks.get('session_start')({}, ctx);
+    await callbacks.get('agent_start')({}, ctx);
+    await callbacks.get('agent_settled')({}, ctx);
+    assert.equal(events.at(-1).stop_reason, 'unknown');
   } finally {
     events.splice(firstEvent);
     if (previous === undefined) delete process.env.PEBREL_HOOK_EXE;

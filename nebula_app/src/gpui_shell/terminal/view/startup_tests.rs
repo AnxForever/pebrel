@@ -13,7 +13,9 @@ impl Render for Surface {
     }
 }
 
-fn open(cx: &mut TestAppContext) -> (Entity<TerminalView>, &mut VisualTestContext, Receiver<Msg>) {
+pub(super) fn open(
+    cx: &mut TestAppContext,
+) -> (Entity<TerminalView>, &mut VisualTestContext, Receiver<Msg>) {
     cx.update(|cx| {
         gpui_component::init(cx);
         cx.set_global(Settings::load(nebula_settings::ThemeName::Nord));
@@ -52,7 +54,7 @@ fn open(cx: &mut TestAppContext) -> (Entity<TerminalView>, &mut VisualTestContex
     (view, window, receiver)
 }
 
-fn feed(view: &mut TerminalView, bytes: &[u8]) {
+pub(super) fn feed(view: &mut TerminalView, bytes: &[u8]) {
     let mut term = view.session.as_ref().unwrap().term.lock();
     let mut parser = nebula_terminal::vte::ansi::Processor::<
         nebula_terminal::vte::ansi::StdSyncHandler,
@@ -141,16 +143,15 @@ fn pi_cancelled_turn_becomes_idle_instead_of_completed(cx: &mut TestAppContext) 
     let (view, window, _) = open(cx);
     view.update(window, |view, cx| {
         for payload in [
-            r#"{"kind":"prompt","session_id":"pi-test"}"#,
-            r#"{"kind":"done","outcome":"cancelled","session_id":"pi-test"}"#,
+            r#"{"kind":"prompt","session_id":"pi-cancelled-test"}"#,
+            r#"{"kind":"done","stop_reason":"aborted","session_id":"pi-cancelled-test"}"#,
         ] {
             let wire = format!("nebula-hook/1 source=pi\n{payload}");
             let event = crate::ai_hook::parse_remote_envelope(wire.as_bytes(), Some(view.pane_id))
                 .expect("Pi hook");
             assert!(view.handle_ai_hook(&event, cx));
         }
-        assert_eq!(view.agent_status, crate::ai_agents::AgentStatus::Idle);
-        assert!(!view.agent_turn_active);
+        assert_eq!(view.agent_activity.status(), crate::ai_agents::AgentStatus::Idle);
     });
 }
 
@@ -169,16 +170,16 @@ fn pi_outcomes_emit_only_the_matching_notification(cx: &mut TestAppContext) {
             }
         })
     });
-    for (outcome, status, expected_count) in [
-        ("cancelled", crate::ai_agents::AgentStatus::Idle, 0),
+    for (reason, status, expected_count) in [
+        ("aborted", crate::ai_agents::AgentStatus::Idle, 0),
         ("unknown", crate::ai_agents::AgentStatus::Idle, 0),
-        ("failed", crate::ai_agents::AgentStatus::Idle, 1),
-        ("success", crate::ai_agents::AgentStatus::Done, 2),
+        ("error", crate::ai_agents::AgentStatus::Idle, 1),
+        ("stop", crate::ai_agents::AgentStatus::Done, 2),
     ] {
         view.update(window, |view, cx| {
             for payload in [
                 serde_json::json!({"kind": "prompt", "session_id": "pi-test"}),
-                serde_json::json!({"kind": "done", "outcome": outcome, "session_id": "pi-test"}),
+                serde_json::json!({"kind": "done", "stop_reason": reason, "session_id": "pi-test"}),
             ] {
                 let wire = format!("nebula-hook/1 source=pi\n{payload}");
                 let event =
@@ -186,12 +187,9 @@ fn pi_outcomes_emit_only_the_matching_notification(cx: &mut TestAppContext) {
                         .expect("Pi hook");
                 assert!(view.handle_ai_hook(&event, cx));
             }
-            assert_eq!(view.agent_status, status);
-            if outcome != "success" {
-                assert!(!view.agent_turn_active);
-            }
+            assert_eq!(view.agent_activity.status(), status);
         });
-        assert_eq!(notifications.borrow().len(), expected_count, "{outcome}");
+        assert_eq!(notifications.borrow().len(), expected_count, "{reason}");
     }
     let notifications = notifications.borrow();
     let crate::notify::Notification::AiTurn { message, attention, .. } = &notifications[0] else {

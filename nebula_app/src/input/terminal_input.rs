@@ -247,6 +247,24 @@ pub(crate) fn build_sequence(input: &KeyInput, mods: ModifiersState, mode: TermM
 /// Encode one API-level named key from normalized facts. This path deliberately
 /// excludes printable text and synthesizes a complete press/release pair only
 /// for protocols that report key state.
+pub(crate) fn build_runtime_sequence_for_program(
+    key: RuntimeKey,
+    modifiers: RuntimeKeyModifiers,
+    repeat: u16,
+    mode: TermMode,
+    program: Option<&str>,
+) -> Vec<u8> {
+    if key == RuntimeKey::Enter
+        && modifiers.shift
+        && !modifiers.control
+        && !modifiers.alt
+        && shift_enter_as_lf(program, mode)
+    {
+        return vec![b'\n'; usize::from(repeat)];
+    }
+    build_runtime_sequence(key, modifiers, repeat, mode)
+}
+
 pub(crate) fn build_runtime_sequence(
     key: RuntimeKey,
     modifiers: RuntimeKeyModifiers,
@@ -515,11 +533,24 @@ fn runtime_legacy_sequence(
 
 /// Select protocol precedence for ConPTY's native input mode. Child-requested
 /// Win32 records are the fallback, not a competing encoder. Once the child has
-/// requested Kitty keyboard flags, those flags describe the wire contract and
+/// requested CSI-u keyboard flags, those flags describe the wire contract and
 /// must take precedence over DECSET 9001.
 #[inline]
 pub(crate) fn use_win32_input_mode(mode: TermMode) -> bool {
     mode.contains(TermMode::WIN32_INPUT_MODE) && !mode.intersects(TermMode::KITTY_KEYBOARD_PROTOCOL)
+}
+
+/// Multiline compatibility when the application has not negotiated a keyboard
+/// protocol. Claude enables CSI-u only for a terminal-name allowlist (including
+/// WT); unknown terminals use its LF newline binding. ConPTY translates a native
+/// Shift+Return record to CR for byte readers, even when UnicodeChar is LF.
+/// Keep native records for other Windows readers (Codex and PSReadLine).
+pub(crate) fn shift_enter_as_lf(program: Option<&str>, mode: TermMode) -> bool {
+    !mode.intersects(TermMode::KITTY_KEYBOARD_PROTOCOL)
+        && (!cfg!(windows)
+            || !use_win32_input_mode(mode)
+            || program.and_then(crate::ai_agents::AgentKind::parse)
+                == Some(crate::ai_agents::AgentKind::Claude))
 }
 
 /// Synthesize key-up sequences for modifiers still held when the window loses
@@ -864,7 +895,7 @@ impl SequenceBuilder {
             _ => base,
         };
 
-        // NOTE: Kitty's protocol mandates that the modifier state is applied before
+        // NOTE: CSI-u's protocol mandates that the modifier state is applied before
         // key press, however winit sends them after the key press, so for modifiers
         // itself apply the state based on keysyms and not the _actual_ modifiers
         // state, which is how kitty is doing so and what is suggested in such case.
@@ -923,7 +954,7 @@ bitflags::bitflags! {
         const ALT     = 0b0000_0010;
         const CONTROL = 0b0000_0100;
         const SUPER   = 0b0000_1000;
-        // NOTE: Kitty protocol defines additional modifiers to what is present here, like
+        // NOTE: CSI-u protocol defines additional modifiers to what is present here, like
         // Capslock, but it's not a modifier as per winit.
     }
 }
@@ -1066,6 +1097,74 @@ mod vt_tests {
     }
 
     #[test]
+    fn runtime_multiline_compatibility_preserves_native_and_negotiated_keys() {
+        let shift = RuntimeKeyModifiers { shift: true, ..Default::default() };
+        for mode in [TermMode::empty(), TermMode::WIN32_INPUT_MODE] {
+            assert_eq!(
+                build_runtime_sequence_for_program(
+                    RuntimeKey::Enter,
+                    shift,
+                    2,
+                    mode,
+                    Some("claude")
+                ),
+                b"\n\n"
+            );
+            assert!(
+                build_runtime_sequence_for_program(
+                    RuntimeKey::Enter,
+                    shift,
+                    0,
+                    mode,
+                    Some("claude")
+                )
+                .is_empty()
+            );
+        }
+        let native = TermMode::WIN32_INPUT_MODE;
+        if cfg!(windows) {
+            for program in [None, Some("codex"), Some("pwsh")] {
+                assert_eq!(
+                    build_runtime_sequence_for_program(
+                        RuntimeKey::Enter,
+                        shift,
+                        1,
+                        native,
+                        program
+                    ),
+                    build_runtime_sequence(RuntimeKey::Enter, shift, 1, native),
+                );
+            }
+        }
+        for mode in [
+            TermMode::DISAMBIGUATE_ESC_CODES,
+            native | TermMode::DISAMBIGUATE_ESC_CODES | TermMode::REPORT_EVENT_TYPES,
+        ] {
+            assert_eq!(
+                build_runtime_sequence_for_program(
+                    RuntimeKey::Enter,
+                    shift,
+                    1,
+                    mode,
+                    Some("claude")
+                ),
+                build_runtime_sequence(RuntimeKey::Enter, shift, 1, mode),
+            );
+        }
+        let combined = RuntimeKeyModifiers { control: true, ..shift };
+        assert_eq!(
+            build_runtime_sequence_for_program(
+                RuntimeKey::Enter,
+                combined,
+                1,
+                native,
+                Some("claude")
+            ),
+            build_runtime_sequence(RuntimeKey::Enter, combined, 1, native),
+        );
+    }
+
+    #[test]
     fn runtime_ctrl_letter_uses_c0_or_kitty_without_printable_text() {
         let modifiers = RuntimeKeyModifiers { control: true, ..Default::default() };
         assert_eq!(
@@ -1138,7 +1237,7 @@ mod vt_tests {
         let held = ModifiersState::CONTROL | ModifiersState::SHIFT;
         // Legacy VT never encodes bare modifiers.
         assert!(build_focus_loss_key_ups(held, TermMode::empty()).is_empty());
-        // Kitty without REPORT_EVENT_TYPES never reports releases; a
+        // CSI-u without REPORT_EVENT_TYPES never reports releases; a
         // synthetic one would be a protocol violation.
         assert!(build_focus_loss_key_ups(held, TermMode::REPORT_ALL_KEYS_AS_ESC).is_empty());
         // Disambiguate-only sessions never saw the modifier go down.

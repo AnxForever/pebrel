@@ -1,5 +1,8 @@
 //! 终端视图：持有会话、处理输入与 IME、驱动重绘。
 
+#[cfg(all(test, feature = "gpui-test-support"))]
+mod activity_tests;
+mod agent_activity;
 mod broadcast;
 mod completion;
 mod confirmation;
@@ -307,35 +310,11 @@ pub struct TerminalView {
     last_process_probe: Option<std::time::Instant>,
     active_run: Option<crate::runtime_api::RuntimePaneRun>,
     last_run: Option<crate::runtime_api::RuntimeRunOutcome>,
-    /// Hook 事件驱动的 agent 回合状态（旧壳 `nebula_state.agent_status` 的
-    /// 边沿触发版）。`Unknown` = 本 pane 没有 agent 参与，spinner 完全由
-    /// `command_running`/`running_program` 决定。
-    agent_status: crate::ai_agents::AgentStatus,
-    /// 状态证据来源与命中的屏幕规则。Runtime API 直接投影这两项，外部
-    /// Agent 可以区分 hook 权威边沿、屏幕补偿和仅进程识别。
-    agent_status_source: crate::ai_agents::AgentStatusSource,
-    agent_status_rule: Option<String>,
-    /// 本次前台 agent 会话是否收到过 hook（旧壳同名字段同语义）：屏幕
-    /// 检测的空闲提示符不得降级 hook 报出的 Done/Blocked 精确终态。
-    agent_hook_seen: bool,
-    /// 这个 pane 的主 agent 进程 pid（第一个报到的那个）。只有它能写 pane 的
-    /// 会话身份；嵌套 `claude -p` 子代理有自己的 pid，它那个短命 session id
-    /// 不能顶掉真正活着的会话。回到提示符（133;D）或 SessionEnd 时清空。
-    primary_agent_pid: Option<u32>,
+    /// Shared lifecycle owns hook authority, session scope and fallback evidence.
+    agent_activity: crate::ai_hook::lifecycle::AgentActivity,
     /// 程序上报的任务进度（OSC 9;4）。存在 pane 上、由宿主投到任务栏：一个
     /// 窗口只有一个任务栏按钮，谁被看着只有宿主知道。
     pub progress: crate::taskbar::TaskProgress,
-    /// 本 pane 的 agent 在当前回合有过活动（hook 派活、屏幕判 working、或
-    /// Runtime 提交）。屏幕回到空闲提示符时据此区分「干完了、你还没看」
-    /// （Done，蓝点）与「从没开工」（Idle，只显示 shell 标签）——消费点在
-    /// `runtime::refresh_agent_screen_state`。
-    agent_turn_active: bool,
-    /// 屏幕检测连续看到空闲提示符的拍数；Working 连续两拍空闲才降级
-    /// （单拍可能是重绘间隙），非 idle 检测与任何 hook 边沿都清零。
-    idle_screen_streak: u8,
-    /// Runtime 派活后，旧输入框仍可能连续命中 `prompt_idle`。在看到本回合
-    /// 的 working/blocked 屏幕或权威 hook 前，不允许它伪造完成边沿。
-    agent_runtime_submit_pending: bool,
     pending_runtime_submit: Option<crate::display::state::RuntimeSubmitBarrier>,
     pending_shell_command: Option<startup_command::PendingShellCommand>,
     recovery: startup_command::SessionRecovery,
@@ -535,8 +514,12 @@ impl TerminalView {
                     let mut parts = rest.splitn(3, '|');
                     parts.next();
                     self.branch = parts.next().unwrap_or("").trim().to_owned();
-                    self.running_program =
-                        parts.next().map(|p| p.trim().to_owned()).filter(|p| !p.is_empty());
+                    if let Some(program) = parts.next()
+                        && !self.agent_activity.hook_seen()
+                    {
+                        self.running_program =
+                            (!program.trim().is_empty()).then(|| program.trim().to_owned());
+                    }
                     // 协议串不是窗口标题，更不是 tab 名。
                 } else {
                     self.title = title;
@@ -624,18 +607,7 @@ impl TerminalView {
                 {
                     return;
                 }
-                self.notify_command_done(cx);
-                self.last_command_failed = exit_code.is_some_and(|code| code != 0);
-                // 旧壳同款收尾：CLI 退回提示符后，它不再是这个 pane 的前台
-                // 事实——hook 稍后若仍在跑会重新点亮（handle_ai_hook 覆写）。
-                if self.clear_foreground_agent_state() {
-                    cx.emit(TerminalViewEvent::TitleChanged);
-                }
-                if let Some(run) = self.active_run.take() {
-                    self.last_run =
-                        Some(crate::runtime_api::RuntimeRunOutcome::command_done(run, exit_code));
-                }
-                cx.notify();
+                self.finish_foreground_command(exit_code, cx);
             },
             TermEvent::Notify(body) => {
                 let body = body.trim().to_owned();
@@ -778,15 +750,11 @@ impl TerminalView {
     }
 
     fn on_bell(&mut self, cx: &mut Context<Self>) {
-        // 「有人在等你」的兜底与响铃的**提示方式**无关：`BellMode::None` 关掉的
-        // 是声音和闪屏，不该把徽章一起关掉，所以这一段排在那道闸之前。
-        //
-        // 兜底只在没有权威判定时成立（见 `AgentStatus::is_decided`）：CC /
-        // codex 回合结束也会响铃，让响铃压过 hook / 屏幕规则报出的 `Done`，
-        // 屏幕上就会把「完成」显示成「在问你」。
-        if self.running_program.is_some() && !self.agent_status.is_decided() {
-            self.awaiting_input = true;
-            cx.notify();
+        // Typed hooks own this agent's result and attention notifications.
+        // BEL carries neither success nor error metadata and must not add a
+        // second completion card or sound to each failed retry.
+        if self.agent_activity.hook_seen() {
+            return;
         }
         let mode = nebula_settings::RuntimeSettings::load().bell;
         if mode == nebula_settings::BellModeName::None {
@@ -1180,7 +1148,8 @@ impl TerminalView {
         // Tab、Esc、Home、Ctrl+C……）一律作废本行镜像与提示，宁缺毋滥。
         self.track_encoded_key(ks, &mode, cx);
 
-        if let Some(bytes) = keymap::encode(ks, &mode) {
+        if let Some(bytes) = keymap::encode_for_program(ks, &mode, self.running_program.as_deref())
+        {
             keymap::trace_enter(ks, &mode, &bytes);
             self.write_user_key(ks.clone(), bytes, cx);
             cx.stop_propagation();
@@ -1488,7 +1457,7 @@ impl TerminalView {
     fn open_answer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(snapshot) = self.answers.latest.clone() else { return };
         let reader = cx.new(|cx| super::answer_reader::AnswerReader::new(snapshot, cx));
-        if self.agent_status == crate::ai_agents::AgentStatus::Blocked {
+        if self.agent_activity.status() == crate::ai_agents::AgentStatus::Blocked {
             reader.update(cx, |reader, cx| reader.needs_attention(cx));
         }
         cx.subscribe_in(

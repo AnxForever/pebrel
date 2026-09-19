@@ -106,31 +106,6 @@ pub enum Notification {
     AiTurn { program: String, message: Option<String>, attention: bool },
 }
 
-impl crate::ai_hook::AiHookEvent {
-    pub(crate) fn turn_notification(
-        &self,
-        language: crate::display::UiLanguage,
-        attention: bool,
-    ) -> Option<Notification> {
-        use crate::ai_hook::{AiHookKind, AiTurnOutcome};
-        if self.kind != AiHookKind::TurnDone || self.active_background_tasks() > 0 {
-            return None;
-        }
-        let message = match self.outcome {
-            Some(AiTurnOutcome::Cancelled | AiTurnOutcome::Unknown) => return None,
-            Some(AiTurnOutcome::Failed) => {
-                Some(language.text(crate::i18n::Message::NotificationsTurnFailed).to_owned())
-            },
-            Some(AiTurnOutcome::Success) | None => self.message.clone(),
-        };
-        Some(Notification::AiTurn {
-            program: self.source.clone(),
-            message,
-            attention: attention && self.outcome != Some(AiTurnOutcome::Failed),
-        })
-    }
-}
-
 /// Longest notification body any shell may render.
 ///
 /// A toast/banner is a glance layer, not a reader. Codex's turn-complete
@@ -160,6 +135,36 @@ pub(crate) fn clamp_toast_body(body: &str) -> String {
 }
 
 impl Notification {
+    /// Failures use fixed localized text; interrupted or incomplete turns stay silent.
+    pub(crate) fn from_ai_hook(
+        event: &crate::ai_hook::AiHookEvent,
+        message: Option<String>,
+        attention: bool,
+        language: crate::display::UiLanguage,
+    ) -> Option<Self> {
+        use crate::ai_hook::{AiHookKind, AiTurnOutcome};
+        let mut message = message;
+        let mut attention = attention;
+        if event.kind == AiHookKind::TurnDone {
+            if event.active_background_tasks() > 0 {
+                return None;
+            }
+            match event.turn_outcome {
+                AiTurnOutcome::Cancelled | AiTurnOutcome::Incomplete | AiTurnOutcome::Unknown => {
+                    return None;
+                },
+                AiTurnOutcome::Failed => {
+                    message = Some(
+                        language.text(crate::i18n::Message::NotificationsTurnFailed).to_owned(),
+                    );
+                    attention = false;
+                },
+                AiTurnOutcome::Succeeded | AiTurnOutcome::Unspecified => {},
+            }
+        }
+        Some(Self::AiTurn { program: event.source.clone(), message, attention })
+    }
+
     /// Source classification only. In-app preferences must not silence native
     /// notifications or infer an AI source from arbitrary message text.
     pub(crate) fn is_ai(&self) -> bool {
@@ -336,26 +341,37 @@ mod delivery_tests {
 
     #[test]
     fn pi_outcomes_do_not_turn_failure_or_cancellation_into_success() {
-        for (outcome, expected) in [
-            (Some("failed"), Some("本轮失败。")),
-            (Some("cancelled"), None),
-            (Some("unknown"), None),
-            (Some("future"), None),
+        for (reason, expected) in [
+            ("error", Some("本轮失败。")),
+            ("aborted", None),
+            ("unknown", None),
+            ("future", None),
+            ("length", None),
+            ("toolUse", None),
         ] {
-            let payload = serde_json::json!({"kind": "done", "outcome": outcome});
+            let payload =
+                serde_json::json!({"kind": "done", "stop_reason": reason, "message": "SECRET"});
             let wire = format!("nebula-hook/1 source=pi\n{payload}");
             let event = crate::ai_hook::parse_remote_envelope(wire.as_bytes(), Some(1)).unwrap();
-            let notification = event.turn_notification(crate::display::UiLanguage::ZhCn, false);
+            let notification = Notification::from_ai_hook(
+                &event,
+                event.message.clone(),
+                false,
+                crate::display::UiLanguage::ZhCn,
+            );
             assert_eq!(notification.map(|value| value.toast_text().1).as_deref(), expected);
         }
-        for outcome in [None, Some("success")] {
+        for reason in [None, Some("stop")] {
             let mut payload = serde_json::json!({"kind": "done"});
-            if let Some(outcome) = outcome {
-                payload["outcome"] = outcome.into();
+            if let Some(reason) = reason {
+                payload["stop_reason"] = reason.into();
             }
             let wire = format!("nebula-hook/1 source=pi\n{payload}");
             let event = crate::ai_hook::parse_remote_envelope(wire.as_bytes(), Some(1)).unwrap();
-            assert!(event.turn_notification(crate::display::UiLanguage::EnUs, false).is_some());
+            assert!(
+                Notification::from_ai_hook(&event, None, false, crate::display::UiLanguage::EnUs)
+                    .is_some()
+            );
         }
     }
 

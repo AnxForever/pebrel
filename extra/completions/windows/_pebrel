@@ -1129,6 +1129,7 @@ _arguments "${_arguments_options[@]}" : \
 ;;
 (setup-ai)
 _arguments "${_arguments_options[@]}" : \
+'--ssh=[Install or remove hooks on an SSH host (alias or user@host)]:DESTINATION:_default' \
 '--remove[Remove Pebrel'\''s hooks from claude'\''s settings.json instead of installing them]' \
 '-h[Print help]' \
 '--help[Print help]' \

@@ -51,10 +51,7 @@ impl TerminalView {
         );
         let Some(reply) = reply else { return false };
         self.write_input(reply, cx);
-        self.agent_status = crate::ai_agents::AgentStatus::Working;
-        self.agent_turn_active = true;
-        self.agent_runtime_submit_pending = true;
-        self.idle_screen_streak = 0;
+        self.agent_activity.submitted();
         cx.emit(TerminalViewEvent::TitleChanged);
         true
     }

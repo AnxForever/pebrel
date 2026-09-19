@@ -1571,6 +1571,10 @@ impl<'a, N: Notify + 'a, T: EventListener> input::ActionContext<T> for ActionCon
         self.display.nebula_commit_line(self.nebula_state);
     }
 
+    fn nebula_running_program(&self) -> Option<&str> {
+        self.nebula_state.running_program.as_deref()
+    }
+
     #[inline]
     fn nebula_clear_line(&mut self) {
         crate::display::nebula_clear_line(self.nebula_state);
@@ -2840,11 +2844,13 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                             self.ctx.display.nebula_report_cwd(self.ctx.nebula_state, &cwd);
                             self.ctx.nebula_state.branch = parts.next().unwrap_or("").to_owned();
                             if let Some(program) = parts.next() {
-                                self.ctx.nebula_state.running_program = if program.is_empty() {
-                                    None
-                                } else {
-                                    Some(program.to_owned())
-                                };
+                                if !self.ctx.nebula_state.agent_activity.hook_seen() {
+                                    self.ctx.nebula_state.running_program = if program.is_empty() {
+                                        None
+                                    } else {
+                                        Some(program.to_owned())
+                                    };
+                                }
                                 // A 4-field title only ever comes from the
                                 // remote `nebula ssh` integration, so the
                                 // typed ssh login is confirmed connected:
@@ -2932,32 +2938,26 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                         }
                         // Program identity for the sidebar tab icon, from the
                         // line captured at Enter (buffers are cleared by now).
-                        self.ctx.nebula_state.running_program =
-                            crate::ai_agents::AgentKind::parse_command(
-                                &self.ctx.nebula_state.last_committed,
-                            )
-                            .map(|agent| agent.slug().to_owned())
-                            .or_else(|| {
-                                crate::display::extract_program(
+                        if !self.ctx.nebula_state.agent_activity.hook_seen() {
+                            self.ctx.nebula_state.running_program =
+                                crate::ai_agents::AgentKind::parse_command(
                                     &self.ctx.nebula_state.last_committed,
                                 )
-                            });
-                        self.ctx.nebula_state.agent_hook_seen = false;
-                        self.ctx.nebula_state.agent_status_rule = None;
-                        self.ctx.nebula_state.agent_status_source =
-                            crate::ai_agents::AgentStatusSource::Process;
-                        self.ctx.nebula_state.agent_status = if self
-                            .ctx
-                            .nebula_state
-                            .running_program
-                            .as_deref()
-                            .and_then(crate::ai_agents::AgentKind::parse)
-                            .is_some()
-                        {
-                            crate::ai_agents::AgentStatus::Working
-                        } else {
-                            crate::ai_agents::AgentStatus::Unknown
-                        };
+                                .map(|agent| agent.slug().to_owned())
+                                .or_else(|| {
+                                    crate::display::extract_program(
+                                        &self.ctx.nebula_state.last_committed,
+                                    )
+                                });
+                            let agent = self
+                                .ctx
+                                .nebula_state
+                                .running_program
+                                .as_deref()
+                                .and_then(crate::ai_agents::AgentKind::parse)
+                                .is_some();
+                            self.ctx.nebula_state.agent_activity.begin_command(agent);
+                        }
                         // Arm the ssh host auto-save: when this command is an
                         // interactive ssh login, hold its destination until a
                         // remote NEBULA| title or a long-enough session
@@ -2984,15 +2984,17 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                         // CLI 退回提示符，对话不再是这个 pane 的前台事实；
                         // 留着它，快照会把一个已经退出的会话当活的接续。
                         self.ctx.nebula_state.ai_session = None;
-                        self.ctx.nebula_state.agent_hook_seen = false;
-                        self.ctx.nebula_state.agent_status = crate::ai_agents::AgentStatus::Unknown;
-                        self.ctx.nebula_state.agent_status_source =
-                            crate::ai_agents::AgentStatusSource::Unknown;
-                        self.ctx.nebula_state.agent_status_rule = None;
+                        let hooked = self.ctx.nebula_state.agent_activity.hook_seen();
+                        self.ctx.nebula_state.agent_activity.command_finished();
                         self.ctx.nebula_state.pending_command_prompt = None;
-                        self.ctx.nebula_state.agent_runtime_submit_pending = false;
                         self.ctx.nebula_state.runtime_submit_barrier = None;
-                        self.ctx.nebula_state.idle_screen_streak = 0;
+                        #[cfg(windows)]
+                        if let Some(hwnd) = self.ctx.display.window.native_window_handle_id() {
+                            crate::taskbar::apply(
+                                hwnd as isize,
+                                crate::taskbar::TaskProgress::None,
+                            );
+                        }
                         let pending_ssh = self.ctx.nebula_state.pending_ssh_host.take();
                         self.ctx.nebula_state.awaiting_input = false;
                         if let Some(run) = self.ctx.nebula_state.active_run.take() {
@@ -3017,7 +3019,7 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                                     self.ctx.display.nebula_save_ssh_host(&host);
                                 }
                             }
-                            if duration >= crate::notify::COMMAND_NOTIFY_MIN {
+                            if !hooked && duration >= crate::notify::COMMAND_NOTIFY_MIN {
                                 // Sidebar dot until the tab gets looked at
                                 // (cleared instantly for the visible tab).
                                 self.ctx.nebula_state.finished_unseen = true;
@@ -3071,6 +3073,9 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                     },
                     TerminalEvent::AiHookEnvelope(_) => (),
                     TerminalEvent::Bell => {
+                        if self.ctx.nebula_state.agent_activity.hook_seen() {
+                            return;
+                        }
                         // Claude Code / Codex ring BEL when a turn finishes, so
                         // an unfocused bell is the primary "AI task done"
                         // signal: always request attention + sound, without
@@ -3088,13 +3093,6 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                                 },
                                 tab_id,
                             );
-                        }
-
-                        // A bell from a tracked program (claude finishing a
-                        // turn) means it now waits for input: pause the
-                        // sidebar spinner until the user types again.
-                        if self.ctx.nebula_state.running_program.is_some() {
-                            self.ctx.nebula_state.awaiting_input = true;
                         }
 
                         // Ring visual bell.

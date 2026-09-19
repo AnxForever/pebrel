@@ -31,12 +31,19 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::platform::{Platform, local_paths};
+
 /// Decode a file URI or local path into a native filesystem PathBuf.
 ///
 /// Returns `None` when the input is not a local file path or recognized `file:`
 /// URI (allowing the caller to fall back to the default web browser handler).
 pub fn file_uri_to_local_path(uri: &str) -> Option<PathBuf> {
-    file_uri_to_local_path_with(uri, |drive| drive_exists(drive), home::home_dir, cfg!(windows))
+    file_uri_to_local_path_with(
+        uri,
+        local_paths::drive_exists,
+        home::home_dir,
+        Platform::current() == Platform::Windows,
+    )
 }
 
 /// Open a local path (file or directory) using the platform's default handler.
@@ -51,7 +58,7 @@ pub fn open_local_path(path: &Path) -> std::io::Result<()> {
         Ok(()) => {
             log::debug!("open_local_path helper launched for {}", path.display());
             Ok(())
-        }
+        },
         Err(open_err) => {
             log::debug!(
                 "open_local_path open failed for {}: {open_err}; falling back to reveal",
@@ -59,21 +66,18 @@ pub fn open_local_path(path: &Path) -> std::io::Result<()> {
             );
             match crate::platform::file_manager::reveal(path) {
                 Ok(()) => {
-                    log::debug!(
-                        "open_local_path fallback reveal succeeded for {}",
-                        path.display()
-                    );
+                    log::debug!("open_local_path fallback reveal succeeded for {}", path.display());
                     Ok(())
-                }
+                },
                 Err(reveal_err) => {
                     log::debug!(
                         "open_local_path fallback reveal also failed for {}: {reveal_err}",
                         path.display()
                     );
                     Err(open_err)
-                }
+                },
             }
-        }
+        },
     }
 }
 
@@ -90,14 +94,14 @@ impl LocalLinkError {
         match self {
             Self::MissingCwd(rel) => {
                 language.format(crate::i18n::Message::CommonLinkMissingCwd, &[("path", rel)])
-            }
+            },
             Self::FileNotFound(path) => language.format(
                 crate::i18n::Message::CommonLinkFileNotFound,
                 &[("path", &path.display().to_string())],
             ),
             Self::OpenFailed(err) => {
                 language.format(crate::i18n::Message::CommonLinkOpenFailed, &[("error", err)])
-            }
+            },
         }
     }
 }
@@ -225,11 +229,7 @@ fn is_explicit_relative_path(s: &str) -> bool {
 }
 
 fn clean_relative_prefix(s: &str) -> &str {
-    if let Some(tail) = s.strip_prefix("./").or_else(|| s.strip_prefix(r".\")) {
-        tail
-    } else {
-        s
-    }
+    if let Some(tail) = s.strip_prefix("./").or_else(|| s.strip_prefix(r".\")) { tail } else { s }
 }
 
 fn has_scheme_prefix(s: &str) -> bool {
@@ -237,7 +237,9 @@ fn has_scheme_prefix(s: &str) -> bool {
         let scheme = &s[..colon];
         return scheme.len() >= 2
             && scheme.starts_with(|c: char| c.is_ascii_alphabetic())
-            && scheme.chars().all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '-' || c == '.');
+            && scheme
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '-' || c == '.');
     }
     false
 }
@@ -257,13 +259,9 @@ pub fn try_open_local_link_with_cwd(
     match classify_link_target_with_cwd(text, cwd) {
         LinkTargetKind::LocalExisting(path) => {
             Some(open_local_path(&path).map_err(|e| LocalLinkError::OpenFailed(e.to_string())))
-        }
-        LinkTargetKind::LocalMissing(path) => {
-            Some(Err(LocalLinkError::FileNotFound(path)))
-        }
-        LinkTargetKind::RelativePath(rel) => {
-            Some(Err(LocalLinkError::MissingCwd(rel)))
-        }
+        },
+        LinkTargetKind::LocalMissing(path) => Some(Err(LocalLinkError::FileNotFound(path))),
+        LinkTargetKind::RelativePath(rel) => Some(Err(LocalLinkError::MissingCwd(rel))),
         LinkTargetKind::ProtocolUri(_) | LinkTargetKind::Unrecognized(_) => None,
     }
 }
@@ -290,22 +288,20 @@ pub fn handle_legacy_hint_command(
             Ok(()) => {
                 log::debug!("trigger_hint opened local link from {target:?}");
                 LegacyHintOutcome::Handled
-            }
+            },
             Err(err) => {
                 let msg = err.localized_message(language);
                 log::debug!("trigger_hint local link failed for {target:?}: {msg}");
                 LegacyHintOutcome::Failed(msg)
-            }
+            },
         }
     } else if is_web_or_protocol_uri(target) {
         let mut args: Vec<std::ffi::OsString> = default_args.iter().map(|s| s.into()).collect();
         args.push(target.into());
         LegacyHintOutcome::SpawnCommand(args)
     } else {
-        let msg = language.format(
-            crate::i18n::Message::CommonLinkUnrecognized,
-            &[("target", target)],
-        );
+        let msg =
+            language.format(crate::i18n::Message::CommonLinkUnrecognized, &[("target", target)]);
         log::debug!("trigger_hint ignored non-protocol target: {target:?}");
         LegacyHintOutcome::Failed(msg)
     }
@@ -346,8 +342,20 @@ fn trim_outer_punctuation(s: &str) -> &str {
     s.trim_end_matches(|c: char| {
         matches!(
             c,
-            '。' | '，' | '、' | '；' | '！' | '？' | '）' | '】' | '》' | '”' | '’'
-                | ';' | ',' | '.' | ':'
+            '。' | '，'
+                | '、'
+                | '；'
+                | '！'
+                | '？'
+                | '）'
+                | '】'
+                | '》'
+                | '”'
+                | '’'
+                | ';'
+                | ','
+                | '.'
+                | ':'
         )
     })
 }
@@ -359,10 +367,8 @@ fn trim_target_punctuation(s: &str) -> &str {
     while end > 0 {
         let c = s[..end].chars().next_back().unwrap();
         // Always strip trailing CJK sentence delimiters
-        if matches!(
-            c,
-            '。' | '，' | '、' | '；' | '！' | '？' | '）' | '】' | '》' | '”' | '’'
-        ) {
+        if matches!(c, '。' | '，' | '、' | '；' | '！' | '？' | '）' | '】' | '》' | '”' | '’')
+        {
             end -= c.len_utf8();
             continue;
         }
@@ -409,21 +415,13 @@ fn file_uri_to_local_path_with(
     // 2. Direct Windows drive path without scheme, e.g.:
     // "D:/work/project/file.md" or "D:\work\project\file.md"
     if is_drive_prefixed(trimmed) {
-        return if is_windows {
-            Some(to_windows(trimmed))
-        } else {
-            Some(PathBuf::from(trimmed))
-        };
+        return if is_windows { Some(to_windows(trimmed)) } else { Some(PathBuf::from(trimmed)) };
     }
 
     // 3. Windows drive path with a stray leading slash, e.g. "/D:/work/..."
     if trimmed.starts_with('/') && is_drive_prefixed(&trimmed[1..]) {
         let rest = &trimmed[1..];
-        return if is_windows {
-            Some(to_windows(rest))
-        } else {
-            Some(PathBuf::from(rest))
-        };
+        return if is_windows { Some(to_windows(rest)) } else { Some(PathBuf::from(rest)) };
     }
 
     // 4. Direct UNC path on Windows, e.g. "\\server\share\file.txt"
@@ -438,7 +436,9 @@ fn file_uri_to_local_path_with(
     if let Some(rest) = strip_scheme(trimmed) {
         if let Some(after_slashes) = rest.strip_prefix("//") {
             // 5a. Home-relative URI: "file://~/..." or "file:///~/..."
-            if let Some(tail) = after_slashes.strip_prefix("~/").or_else(|| after_slashes.strip_prefix("/~/")) {
+            if let Some(tail) =
+                after_slashes.strip_prefix("~/").or_else(|| after_slashes.strip_prefix("/~/"))
+            {
                 let home = home_dir()?;
                 let decoded = percent_decode_utf8(tail);
                 return Some(join_home(home, &decoded, is_windows));
@@ -475,7 +475,8 @@ fn file_uri_to_local_path_with(
                     // Remote host → UNC share on Windows (`\\HOST\path`)
                     let host = percent_decode_utf8(host);
                     let tail = path.trim_start_matches('/').replace('/', "\\");
-                    return (!host.is_empty()).then(|| PathBuf::from(format!("\\\\{host}\\{tail}")));
+                    return (!host.is_empty())
+                        .then(|| PathBuf::from(format!("\\\\{host}\\{tail}")));
                 } else {
                     return None;
                 }
@@ -516,43 +517,7 @@ fn host_is_local(host: &str) -> bool {
     if host == "127.0.0.1" || host == "::1" || host == "[::1]" {
         return true;
     }
-    #[cfg(windows)]
-    if let Ok(name) = std::env::var("COMPUTERNAME") {
-        if name.eq_ignore_ascii_case(host) {
-            return true;
-        }
-    }
-    #[cfg(unix)]
-    {
-        if let Ok(name) = std::env::var("HOSTNAME") {
-            if name.eq_ignore_ascii_case(host) {
-                return true;
-            }
-        }
-        if let Ok(name) = std::env::var("HOST") {
-            if name.eq_ignore_ascii_case(host) {
-                return true;
-            }
-        }
-        if let Some(name) = sys_gethostname() {
-            if name.eq_ignore_ascii_case(host) {
-                return true;
-            }
-        }
-    }
-    false
-}
-
-#[cfg(unix)]
-fn sys_gethostname() -> Option<String> {
-    unsafe {
-        let mut buf = [0 as std::ffi::c_char; 256];
-        if libc::gethostname(buf.as_mut_ptr(), buf.len()) == 0 {
-            std::ffi::CStr::from_ptr(buf.as_ptr()).to_str().ok().map(|s| s.to_string())
-        } else {
-            None
-        }
-    }
+    local_paths::matches_hostname(host)
 }
 
 /// Convert a decoded, local, posix-looking URI path into a platform-appropriate PathBuf.
@@ -576,11 +541,7 @@ fn translate_local_path_impl(
             };
         }
     } else if is_drive_prefixed(path) {
-        return if is_windows {
-            Some(to_windows(path))
-        } else {
-            Some(PathBuf::from(path))
-        };
+        return if is_windows { Some(to_windows(path)) } else { Some(PathBuf::from(path)) };
     }
 
     let trimmed = path.trim_start_matches('/');
@@ -661,17 +622,6 @@ fn to_windows(path: &str) -> PathBuf {
         out[..1].make_ascii_uppercase();
     }
     PathBuf::from(out)
-}
-
-/// Whether drive `letter` (e.g. `'C'`) is currently mounted.
-#[cfg(windows)]
-fn drive_exists(letter: char) -> bool {
-    std::path::Path::new(&format!("{letter}:\\")).exists()
-}
-
-#[cfg(not(windows))]
-fn drive_exists(_letter: char) -> bool {
-    false
 }
 
 /// UTF-8 aware percent-decoding.
@@ -803,14 +753,8 @@ mod tests {
             t_win("D:/work/git/gt_project_git_extra/docs/brainstorms/2026-09-18-global-tutorial-framework-requirements.md"),
             Some(r"D:\work\git\gt_project_git_extra\docs\brainstorms\2026-09-18-global-tutorial-framework-requirements.md".into())
         );
-        assert_eq!(
-            t_win(r"D:\work\git\proj\file.txt"),
-            Some(r"D:\work\git\proj\file.txt".into())
-        );
-        assert_eq!(
-            t_win("/C:/Users/me/file.txt"),
-            Some(r"C:\Users\me\file.txt".into())
-        );
+        assert_eq!(t_win(r"D:\work\git\proj\file.txt"), Some(r"D:\work\git\proj\file.txt".into()));
+        assert_eq!(t_win("/C:/Users/me/file.txt"), Some(r"C:\Users\me\file.txt".into()));
         assert_eq!(
             t_win(r"C:\work\report%20final.docx"),
             Some(r"C:\work\report%20final.docx".into())
@@ -819,50 +763,23 @@ mod tests {
 
     #[test]
     fn file_uri_two_slashes_drive() {
-        assert_eq!(
-            t_win("file://D:/work/project/doc.md"),
-            Some(r"D:\work\project\doc.md".into())
-        );
+        assert_eq!(t_win("file://D:/work/project/doc.md"), Some(r"D:\work\project\doc.md".into()));
     }
 
     #[test]
     fn raw_path_with_trailing_punctuation() {
-        assert_eq!(
-            t_win("D:/work/notes/spec.md。"),
-            Some(r"D:\work\notes\spec.md".into())
-        );
-        assert_eq!(
-            t_win("D:/work/notes/spec.md)"),
-            Some(r"D:\work\notes\spec.md".into())
-        );
-        assert_eq!(
-            t_win("<D:/work/notes/spec.md>"),
-            Some(r"D:\work\notes\spec.md".into())
-        );
+        assert_eq!(t_win("D:/work/notes/spec.md。"), Some(r"D:\work\notes\spec.md".into()));
+        assert_eq!(t_win("D:/work/notes/spec.md)"), Some(r"D:\work\notes\spec.md".into()));
+        assert_eq!(t_win("<D:/work/notes/spec.md>"), Some(r"D:\work\notes\spec.md".into()));
     }
 
     #[test]
     fn home_path_expansion() {
-        assert_eq!(
-            t_unix("~/docs/spec.md"),
-            Some("/mock/home/user/docs/spec.md".into())
-        );
-        assert_eq!(
-            t_unix("~"),
-            Some("/mock/home/user".into())
-        );
-        assert_eq!(
-            t_unix("file://~/notes.txt"),
-            Some("/mock/home/user/notes.txt".into())
-        );
-        assert_eq!(
-            t_unix("file:///~/notes.txt"),
-            Some("/mock/home/user/notes.txt".into())
-        );
-        assert_eq!(
-            t_win(r"~\notes.txt"),
-            Some(r"C:\Users\testuser\notes.txt".into())
-        );
+        assert_eq!(t_unix("~/docs/spec.md"), Some("/mock/home/user/docs/spec.md".into()));
+        assert_eq!(t_unix("~"), Some("/mock/home/user".into()));
+        assert_eq!(t_unix("file://~/notes.txt"), Some("/mock/home/user/notes.txt".into()));
+        assert_eq!(t_unix("file:///~/notes.txt"), Some("/mock/home/user/notes.txt".into()));
+        assert_eq!(t_win(r"~\notes.txt"), Some(r"C:\Users\testuser\notes.txt".into()));
     }
 
     #[test]
@@ -895,63 +812,43 @@ mod tests {
     #[test]
     fn markdown_link_resolution() {
         assert_eq!(
-            extract_link_target("[全局新手引导框架需求规格](D:/work/git/gt_project_git_extra/docs/brainstorms/2026-09-18-global-tutorial-framework-requirements.md)。"),
+            extract_link_target(
+                "[全局新手引导框架需求规格](D:/work/git/gt_project_git_extra/docs/brainstorms/2026-09-18-global-tutorial-framework-requirements.md)。"
+            ),
             "D:/work/git/gt_project_git_extra/docs/brainstorms/2026-09-18-global-tutorial-framework-requirements.md"
         );
-        assert_eq!(
-            extract_link_target("[Web](https://github.com)"),
-            "https://github.com"
-        );
+        assert_eq!(extract_link_target("[Web](https://github.com)"), "https://github.com");
         assert_eq!(
             extract_link_target("[nested [brackets]](D:/path/file.txt)"),
             "D:/path/file.txt"
         );
-        assert_eq!(
-            extract_link_target("[spec](<D:/my files/spec.md>)"),
-            "D:/my files/spec.md"
-        );
+        assert_eq!(extract_link_target("[spec](<D:/my files/spec.md>)"), "D:/my files/spec.md");
 
         assert_eq!(
             t_win("[全局新手引导框架需求规格](D:/work/git/gt_project_git_extra/docs/brainstorms/2026-09-18-global-tutorial-framework-requirements.md)。"),
             Some(r"D:\work\git\gt_project_git_extra\docs\brainstorms\2026-09-18-global-tutorial-framework-requirements.md".into())
         );
-        assert_eq!(
-            t_win("[link](file:///D:/notes/todo.txt)"),
-            Some(r"D:\notes\todo.txt".into())
-        );
+        assert_eq!(t_win("[link](file:///D:/notes/todo.txt)"), Some(r"D:\notes\todo.txt".into()));
         // Naked POSIX in Markdown does NOT resolve without file: or ~
-        assert_eq!(
-            t_unix("[docs](/home/bob/work/repo/README.md)"),
-            None
-        );
+        assert_eq!(t_unix("[docs](/home/bob/work/repo/README.md)"), None);
         assert_eq!(
             t_unix("[docs](file:///home/bob/work/repo/README.md)"),
             Some("/home/bob/work/repo/README.md".into())
         );
-        assert_eq!(
-            t_unix("[home](~/docs/spec.md)"),
-            Some("/mock/home/user/docs/spec.md".into())
-        );
+        assert_eq!(t_unix("[home](~/docs/spec.md)"), Some("/mock/home/user/docs/spec.md".into()));
         assert_eq!(
             extract_link_target("https://en.wikipedia.org/wiki/Rust_(programming_language)"),
             "https://en.wikipedia.org/wiki/Rust_(programming_language)"
         );
         assert_eq!(
-            extract_link_target("[Rust](https://en.wikipedia.org/wiki/Rust_(programming_language))。"),
+            extract_link_target(
+                "[Rust](https://en.wikipedia.org/wiki/Rust_(programming_language))。"
+            ),
             "https://en.wikipedia.org/wiki/Rust_(programming_language)"
         );
-        assert_eq!(
-            extract_link_target("<https://example.com/docs>"),
-            "https://example.com/docs"
-        );
-        assert_eq!(
-            extract_link_target("<D:/x.md>。"),
-            "D:/x.md"
-        );
-        assert_eq!(
-            extract_link_target("<https://example.com/docs>。"),
-            "https://example.com/docs"
-        );
+        assert_eq!(extract_link_target("<https://example.com/docs>"), "https://example.com/docs");
+        assert_eq!(extract_link_target("<D:/x.md>。"), "D:/x.md");
+        assert_eq!(extract_link_target("<https://example.com/docs>。"), "https://example.com/docs");
         // Relative paths cannot be resolved without pane cwd context and must fall back.
         assert_eq!(t_win("./README.md"), None);
         assert_eq!(t_unix("./README.md"), None);
@@ -972,10 +869,7 @@ mod tests {
             LinkTargetKind::RelativePath("./doc.md".into())
         );
         let rel_res = try_open_local_link("./README.md").unwrap();
-        assert_eq!(
-            rel_res,
-            Err(LocalLinkError::MissingCwd("./README.md".into()))
-        );
+        assert_eq!(rel_res, Err(LocalLinkError::MissingCwd("./README.md".into())));
         assert!(rel_res.unwrap_err().localized_message(lang).contains("缺少工作目录"));
 
         // Gate 2: Nonexistent local paths are locked down and reported as missing without spawning opener.
@@ -985,10 +879,7 @@ mod tests {
             LinkTargetKind::LocalMissing(missing.clone())
         );
         let missing_res = try_open_local_link(missing.to_str().unwrap()).unwrap();
-        assert_eq!(
-            missing_res,
-            Err(LocalLinkError::FileNotFound(missing.clone()))
-        );
+        assert_eq!(missing_res, Err(LocalLinkError::FileNotFound(missing.clone())));
         assert!(missing_res.unwrap_err().localized_message(lang).contains("文件不存在"));
 
         // Gate 3: Naked POSIX paths like /etc/passwd or /usr/bin/ls are Unrecognized (never LocalExisting).
@@ -1009,17 +900,11 @@ mod tests {
 
         // Gate 4: Protocol URIs (https, wiki, ssh, file:/) are properly classified.
         let wiki = "https://en.wikipedia.org/wiki/Rust_(programming_language)";
-        assert_eq!(
-            classify_link_target(wiki),
-            LinkTargetKind::ProtocolUri(wiki.into())
-        );
+        assert_eq!(classify_link_target(wiki), LinkTargetKind::ProtocolUri(wiki.into()));
         assert_eq!(try_open_local_link(wiki), None);
 
         let ssh_uri = "ssh:git@github.com:user/repo.git";
-        assert_eq!(
-            classify_link_target(ssh_uri),
-            LinkTargetKind::ProtocolUri(ssh_uri.into())
-        );
+        assert_eq!(classify_link_target(ssh_uri), LinkTargetKind::ProtocolUri(ssh_uri.into()));
         assert_eq!(try_open_local_link(ssh_uri), None);
 
         let vscode_uri = "vscode://file/D:/project/main.rs";
@@ -1058,7 +943,10 @@ mod tests {
             LinkTargetKind::LocalExisting(repo_root.join("Cargo.toml"))
         );
         assert_eq!(
-            classify_link_target_with_cwd("[missing](nonexistent_nebula_file.xyz)", Some(&repo_root)),
+            classify_link_target_with_cwd(
+                "[missing](nonexistent_nebula_file.xyz)",
+                Some(&repo_root)
+            ),
             LinkTargetKind::LocalMissing(repo_root.join("nonexistent_nebula_file.xyz"))
         );
         assert_eq!(
@@ -1085,22 +973,13 @@ mod tests {
         assert_eq!(t_unix("//cdn.example.com/lib.js"), None);
 
         // Gate 5: Single-slash file:/ is recognized as local URI on both platforms
-        #[cfg(windows)]
-        let file_single = "file:/C:/nonexistent_file_test/file.txt";
-        #[cfg(not(windows))]
-        let file_single = "file:/home/nonexistent_file_test/file.txt";
-        assert!(matches!(
-            classify_link_target(file_single),
-            LinkTargetKind::LocalMissing(_) | LinkTargetKind::LocalExisting(_)
-        ));
-        assert_eq!(
-            t_unix("file:/home/user/whatever"),
-            Some("/home/user/whatever".into())
-        );
-        assert_eq!(
-            t_win("file:/C:/test.txt"),
-            Some(r"C:\test.txt".into())
-        );
+        let directory = tempfile::tempdir().unwrap();
+        let missing = directory.path().join("missing.txt");
+        let native = missing.to_string_lossy().replace('\\', "/");
+        let file_single = format!("file:/{}", native.trim_start_matches('/'));
+        assert_eq!(classify_link_target(&file_single), LinkTargetKind::LocalMissing(missing));
+        assert_eq!(t_unix("file:/home/user/whatever"), Some("/home/user/whatever".into()));
+        assert_eq!(t_win("file:/C:/test.txt"), Some(r"C:\test.txt".into()));
 
         // Gate 6: Legacy handler reports failure outcome
         let outcome = handle_legacy_hint_command("./README.md", &[], lang);
