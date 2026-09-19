@@ -23,6 +23,7 @@
 //! ```text
 //! nebula-hook claude                              # payload on stdin
 //! nebula-hook codex <json>                        # payload as last arg
+//! nebula-hook codex --hooks=full                  # native hooks, stdin
 //! nebula-hook codex --chain <exe> <fixed…> <json> # + exec previous notifier
 //! nebula-hook opencode <json>                     # payload as last arg
 //! nebula-hook pi <json>                           # payload as last arg
@@ -185,14 +186,18 @@ fn run() {
 
     // Payload: claude streams JSON on stdin; codex and opencode append it as
     // the last arg.
+    let native_codex = source == "codex"
+        && args.get(1).is_some_and(|arg| matches!(arg.as_str(), "--hooks=turns" | "--hooks=full"));
     let payload = match source.as_str() {
-        "claude" => match read_payload(std::io::stdin().lock()) {
-            Ok(Some(bytes)) => bytes,
-            Ok(None) => {
-                log_outcome(source, "", MAX_PAYLOAD_BYTES + 1, &Outcome::PayloadTooLarge);
-                return;
-            },
-            Err(_) => return,
+        "claude" | "codex" if source == "claude" || native_codex => {
+            match read_payload(std::io::stdin().lock()) {
+                Ok(Some(bytes)) => bytes,
+                Ok(None) => {
+                    log_outcome(source, "", MAX_PAYLOAD_BYTES + 1, &Outcome::PayloadTooLarge);
+                    return;
+                },
+                Err(_) => return,
+            }
         },
         _ => args.last().cloned().unwrap_or_default().into_bytes(),
     };
@@ -205,7 +210,12 @@ fn run() {
     }
 
     let pane = hook_env("PANE_ID").and_then(|value| value.into_string().ok()).unwrap_or_default();
-    let mut message = format!("nebula-hook/1 source={source} pane={pane}\n").into_bytes();
+    let contract = if native_codex {
+        format!(" codex_hooks={}", args[1].strip_prefix("--hooks=").unwrap())
+    } else {
+        String::new()
+    };
+    let mut message = format!("nebula-hook/1 source={source} pane={pane}{contract}\n").into_bytes();
     message.extend_from_slice(&payload);
 
     // 本地 Pane 使用命名管道；远端 Pane 没有本地管道时，把同一信封写入控制终端的私有 OSC。

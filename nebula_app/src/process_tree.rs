@@ -208,6 +208,47 @@ pub fn busy_child(root_pid: u32) -> Option<String> {
     busy_descendant(descendants(root_pid).ok()?)
 }
 
+/// Liveness evidence for status reconciliation, separate from the close-warning
+/// exemptions. A safe-to-close process (for example git) can still be working.
+pub(crate) struct ActivityEvidence {
+    pub agent: Option<String>,
+    pub primary_present: Option<bool>,
+    pub child_present: bool,
+    pub busy: bool,
+}
+
+pub(crate) fn activity_evidence(
+    root_pid: u32,
+    primary_pid: Option<u32>,
+) -> Result<ActivityEvidence, String> {
+    Ok(activity_from_snapshot(&descendants(root_pid)?, primary_pid))
+}
+
+fn activity_from_snapshot(rows: &[ProcessEntry], primary_pid: Option<u32>) -> ActivityEvidence {
+    let mut evidence = ActivityEvidence {
+        agent: None,
+        primary_present: primary_pid.map(|pid| rows.iter().any(|row| row.pid == pid)),
+        child_present: false,
+        busy: false,
+    };
+    for (index, row) in rows.iter().enumerate() {
+        let name = display_name(&row.executable).to_ascii_lowercase();
+        if evidence.agent.is_none() {
+            evidence.agent =
+                crate::ai_agents::AgentKind::parse(&name).map(|agent| agent.slug().to_owned());
+        }
+        if index == 0 {
+            continue;
+        }
+        if matches!(name.as_str(), "conhost" | "openconsole" | "winpty-agent") {
+            continue;
+        }
+        evidence.child_present = true;
+        evidence.busy |= !is_shell_executable(&row.executable);
+    }
+    evidence
+}
+
 fn busy_descendant(processes: Vec<ProcessEntry>) -> Option<String> {
     processes.into_iter().skip(1).find_map(|process| {
         (!is_stateless_process(&process.executable)).then_some(process.executable)
@@ -403,6 +444,41 @@ mod tests {
         };
         assert_eq!(busy_descendant(entries(&["login", "-bash"])), None);
         assert_eq!(busy_descendant(entries(&["login", "-bash", "vim"])), Some("vim".to_owned()));
+    }
+
+    #[test]
+    fn activity_evidence_keeps_close_exemptions_and_liveness_separate() {
+        let rows = |names: &[&str]| {
+            names
+                .iter()
+                .enumerate()
+                .map(|(index, name)| ProcessEntry {
+                    pid: index as u32 + 1,
+                    parent_pid: index as u32,
+                    executable: (*name).into(),
+                    depth: index as u32,
+                })
+                .collect::<Vec<_>>()
+        };
+        let tree = rows(&["pwsh.exe", "git.exe"]);
+        assert_eq!(busy_descendant(tree.clone()), None);
+        let evidence = super::activity_from_snapshot(&tree, None);
+        assert!(evidence.busy, "git is safe to close, but still executing");
+        assert!(evidence.child_present);
+        assert_eq!(evidence.primary_present, None);
+
+        let tree = rows(&["pwsh.exe", "node.exe", "codex.exe"]);
+        let evidence = super::activity_from_snapshot(&tree, Some(3));
+        assert_eq!(evidence.agent.as_deref(), Some("codex"));
+        assert_eq!(evidence.primary_present, Some(true));
+        let evidence = super::activity_from_snapshot(&tree[..2], Some(3));
+        assert_eq!(evidence.primary_present, Some(false));
+        assert!(evidence.child_present, "a wrapper can outlive the agent");
+
+        let evidence = super::activity_from_snapshot(&rows(&["pwsh.exe", "openconsole.exe"]), None);
+        assert!(!evidence.child_present);
+        assert!(!evidence.busy);
+        assert!(super::activity_evidence(0, None).is_err(), "no snapshot is not proof of idle");
     }
 
     fn row(pid: u32, parent: u32, created: u64, executable: &str) -> ProcessRow {

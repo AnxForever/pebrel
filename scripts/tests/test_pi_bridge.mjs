@@ -7,9 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { test, after } from 'node:test';
 
 const root = new URL('../../', import.meta.url);
-const rust = readFileSync(new URL('nebula_app/src/ai_hook/win.rs', root), 'utf8');
-const embedded = rust.match(/const PI_EXTENSION_TS: &str = r#"([\s\S]*?)"#;/)?.[1];
-assert.ok(embedded, 'use the actual generated bridge');
+const embedded = readFileSync(new URL('nebula_app/res/hooks/pi.ts', root), 'utf8');
 const events = [];
 globalThis.__pebrelBridgeSpawn = (_hook, args) => {
   events.push(JSON.parse(args[1]));

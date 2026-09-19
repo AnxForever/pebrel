@@ -25,10 +25,13 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use crate::event::EventProxy;
 use crate::proxy_test::{ProxyTestFailure, ProxyTestOutcome, ProxyTestResult, ProxyTestRoute};
 
+mod agent;
 mod config;
 mod exec;
+mod integration;
 mod lifecycle;
 mod route;
+pub(crate) use integration::setup_cli as setup_ai_cli;
 use route::{ResolvedRoute, RouteTransport};
 
 /// Remote terminals have no pre-primed ConPTY handshake or host row anchoring.
@@ -121,6 +124,7 @@ fn report_stage<H: SshEventHost>(progress: Option<&H>, stage: SshStage) {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum AuthMethod {
     PrivateKey(PathBuf),
+    Agent,
     StoredPassword,
     KeyboardInteractive,
     PromptPassword,
@@ -141,28 +145,27 @@ fn authentication_plan(
 ) -> Vec<AuthMethod> {
     use crate::ssh_profiles::SshAuthMode;
 
-    let key_methods = || {
+    let key_methods = |with_agent| {
         let mut seen = Vec::<String>::new();
-        explicit_keys
-            .iter()
-            .chain(resolved_keys)
-            .filter(|path| {
+        let mut methods = Vec::new();
+        for (index, paths) in [explicit_keys, resolved_keys].into_iter().enumerate() {
+            if with_agent && index == 1 {
+                methods.push(AuthMethod::Agent);
+            }
+            for path in paths {
                 let normalized = path.to_string_lossy().to_lowercase();
-                if seen.contains(&normalized) {
-                    false
-                } else {
+                if !seen.contains(&normalized) {
                     seen.push(normalized);
-                    true
+                    methods.push(AuthMethod::PrivateKey(path.clone()));
                 }
-            })
-            .cloned()
-            .map(AuthMethod::PrivateKey)
-            .collect::<Vec<_>>()
+            }
+        }
+        methods
     };
 
     match mode {
         SshAuthMode::Auto => {
-            let mut methods = key_methods();
+            let mut methods = key_methods(true);
             methods.extend([
                 AuthMethod::StoredPassword,
                 AuthMethod::KeyboardInteractive,
@@ -180,7 +183,7 @@ fn authentication_plan(
                 AuthMethod::PromptPassword,
             ]
         },
-        SshAuthMode::PublicKey => key_methods(),
+        SshAuthMode::PublicKey => key_methods(false),
         SshAuthMode::KeyboardInteractive => vec![AuthMethod::KeyboardInteractive],
     }
 }
@@ -816,14 +819,26 @@ async fn authenticate(
     let mut stored_password_was_present = false;
     let mut interactive_prompt_was_shown = false;
     let mut local_key_errors = Vec::new();
+    let mut agent_attempt = None;
     for method in plan {
         match method {
             AuthMethod::PrivateKey(path) => {
+                if matches!(agent_attempt, Some(agent::Attempt::PartialSuccess { .. })) {
+                    continue;
+                }
                 if try_private_key(session, destination, &path, true, &mut local_key_errors).await?
                 {
                     clear_secret(&mut reusable_password);
                     return Ok(());
                 }
+            },
+            AuthMethod::Agent => {
+                let attempt =
+                    agent::authenticate(session, destination, &profile.private_keys).await?;
+                if attempt == agent::Attempt::Authenticated {
+                    return Ok(());
+                }
+                agent_attempt = Some(attempt);
             },
             AuthMethod::StoredPassword => {
                 if !loaded_stored_password {
@@ -894,7 +909,11 @@ async fn authenticate(
         }
     }
     clear_secret(&mut reusable_password);
-    Err(auth_failure(profile.auth, key_count, &local_key_errors).into())
+    Err(agent::with_diagnostic(
+        auth_failure(profile.auth, key_count, &local_key_errors),
+        agent_attempt.as_ref(),
+    )
+    .into())
 }
 
 /// 在目标主机上跑一条命令并收集它的标准输出，脚本经标准输入送入。
@@ -1340,18 +1359,10 @@ async fn test_connect(route: &ResolvedRoute, request: &SshTestRequest) -> Result
         ..Default::default()
     });
     let mut transport = open_transport(route, config, true, true).await?;
-    match tokio::time::timeout(
-        TEST_TIMEOUT,
-        test_authenticate(&mut transport.session, &route.destination, request),
-    )
-    .await
-    {
-        Ok(result) => result,
-        Err(_) => Err(format!("认证超时（{} 秒无响应）", TEST_TIMEOUT.as_secs()).into()),
-    }
+    test_authenticate(&mut transport.session, &route.destination, request).await
 }
 
-/// 无人值守版认证：none → 草稿密码 → 密钥/已存密码计划。明确的
+/// 无人值守版认证沿用正式连接的计划；草稿密码只替代其中的保存密码。明确的
 /// keyboard-interactive 密码问题可以复用已有密码；OTP 与「连接时询问」在这里
 /// 跳过——测试不能弹框，也不能把真实的二次验证误报成配置错误。
 async fn test_authenticate(
@@ -1359,26 +1370,45 @@ async fn test_authenticate(
     destination: &SshDestination,
     request: &SshTestRequest,
 ) -> Result<(), SessionError> {
+    let mut using_agent = false;
+    match tokio::time::timeout(
+        TEST_TIMEOUT,
+        test_authentication_plan(session, destination, request, &mut using_agent),
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(_) if using_agent => Err(agent::timed_out()),
+        Err(_) => Err(format!("认证超时（{} 秒无响应）", TEST_TIMEOUT.as_secs()).into()),
+    }
+}
+
+async fn test_authentication_plan(
+    session: &mut ClientSession,
+    destination: &SshDestination,
+    request: &SshTestRequest,
+    using_agent: &mut bool,
+) -> Result<(), SessionError> {
     if session.authenticate_none(&destination.user).await?.success() {
         return Ok(());
     }
     let has_draft_password =
         request.password.as_deref().is_some_and(|password| !password.is_empty());
-    if let Some(password) = request.password.as_deref().filter(|p| !p.is_empty()) {
-        if authenticate_password(session, &destination.user, password.as_bytes()).await? {
-            return Ok(());
-        }
-    }
     let plan =
         authentication_plan(request.auth, &request.private_keys, &destination.identity_files);
     let mut interactive_skipped = false;
     let mut stored_password = None;
     let mut loaded_stored_password = false;
     let mut local_key_errors = Vec::new();
-    let mut credential_was_attempted = has_draft_password;
+    let mut credential_was_attempted = false;
+    let mut agent_attempt = None;
     for method in plan {
+        *using_agent = matches!(method, AuthMethod::Agent);
         match method {
             AuthMethod::PrivateKey(path) => {
+                if matches!(agent_attempt, Some(agent::Attempt::PartialSuccess { .. })) {
+                    continue;
+                }
                 // allow_prompt=false：spawn_test 承诺绝不弹框，密钥口令也
                 // 不例外——受口令保护且无已存口令的密钥记为本地问题。
                 if try_private_key(session, destination, &path, false, &mut local_key_errors)
@@ -1388,11 +1418,26 @@ async fn test_authenticate(
                     return Ok(());
                 }
             },
+            AuthMethod::Agent => {
+                let attempt =
+                    agent::authenticate(session, destination, &request.private_keys).await?;
+                if attempt == agent::Attempt::Authenticated {
+                    return Ok(());
+                }
+                agent_attempt = Some(attempt);
+            },
             AuthMethod::StoredPassword => {
                 // A non-empty draft is the user's explicit answer for this
                 // test. Do not let an older credential-manager value turn a
                 // wrong draft into a misleading success.
                 if has_draft_password {
+                    credential_was_attempted = true;
+                    let password = request.password.as_deref().unwrap_or_default();
+                    if authenticate_password(session, &destination.user, password.as_bytes())
+                        .await?
+                    {
+                        return Ok(());
+                    }
                     continue;
                 }
                 if !loaded_stored_password {
@@ -1432,13 +1477,14 @@ async fn test_authenticate(
         }
     }
     clear_secret(&mut stored_password);
-    if !local_key_errors.is_empty() {
-        return Err(format!("私钥无法使用：{}", local_key_errors.join("；")).into());
-    }
-    if interactive_skipped {
-        return Err("服务器可达，但此配置需要连接时交互输入（密码/MFA），测试无法替你完成".into());
-    }
-    Err("认证未通过：请检查密码、私钥或服务器端授权".into())
+    let message = if !local_key_errors.is_empty() {
+        format!("私钥无法使用：{}", local_key_errors.join("；"))
+    } else if interactive_skipped {
+        "服务器可达，但此配置需要连接时交互输入（密码/MFA），测试无法替你完成".into()
+    } else {
+        "认证未通过：请检查密码、私钥或服务器端授权".into()
+    };
+    Err(agent::with_diagnostic(message, agent_attempt.as_ref()).into())
 }
 
 fn auth_failure(

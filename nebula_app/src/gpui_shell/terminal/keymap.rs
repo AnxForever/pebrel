@@ -113,13 +113,37 @@ fn kitty_escape(ks: &Keystroke, mode: &TermMode) -> Option<Vec<u8>> {
     Some(if param == 1 { b"\x1b[27u".to_vec() } else { format!("\x1b[27;{param}u").into_bytes() })
 }
 
-/// 修饰回车由对端编辑器解释，不能当成普通 shell 提交。传统 VT 无法区分
-/// Shift/Ctrl+Enter，仍沿用回车提交；Win32 和 kitty 则保留其修饰信息。
+/// The default multiline chord also works for byte-stream readers without a negotiated keyboard protocol.
+fn is_shift_enter(ks: &Keystroke) -> bool {
+    let mods = &ks.modifiers;
+    ks.key == "enter"
+        && mods.shift
+        && !mods.control
+        && !mods.alt
+        && !mods.platform
+        && !mods.function
+}
+
+pub(super) fn encode_for_program(
+    ks: &Keystroke,
+    mode: &TermMode,
+    program: Option<&str>,
+) -> Option<Vec<u8>> {
+    if is_shift_enter(ks) && crate::input::terminal_input::shift_enter_as_lf(program, *mode) {
+        Some(b"\n".to_vec())
+    } else {
+        encode(ks, mode)
+    }
+}
+
+/// 修饰回车由对端编辑器解释，不能当成普通 shell 提交。纯 Shift+Enter
+/// 在传统 VT 中发送 LF；Win32 和 CSI-u 还保留按键与修饰信息。
 pub(super) fn preserves_enter_modifiers(ks: &Keystroke, mode: &TermMode) -> bool {
     let mods = &ks.modifiers;
     let modified = mods.shift || mods.control || mods.alt;
     ks.key == "enter"
-        && ((kitty_keyboard_active(mode) && (modified || mods.platform))
+        && (is_shift_enter(ks)
+            || (kitty_keyboard_active(mode) && (modified || mods.platform))
             || (cfg!(windows) && use_win32_input_mode(mode) && modified))
 }
 
@@ -261,7 +285,13 @@ pub fn encode(ks: &Keystroke, mode: &TermMode) -> Option<Vec<u8>> {
 
     match ks.key.as_str() {
         "enter" => {
-            return Some(if mods.alt { b"\x1b\r".to_vec() } else { b"\r".to_vec() });
+            return Some(if is_shift_enter(ks) {
+                b"\n".to_vec()
+            } else if mods.alt {
+                b"\x1b\r".to_vec()
+            } else {
+                b"\r".to_vec()
+            });
         },
         "backspace" => {
             // kitty 合同下带 Ctrl 的 Backspace 走 CSI u（127 = kitty 的 Backspace
@@ -628,7 +658,22 @@ mod tests {
     }
 
     #[test]
-    fn legacy_enter_chords_keep_the_existing_cr_encoding() {
+    fn shift_enter_inserts_a_newline_without_kitty_negotiation() {
+        let mut key = keystroke("enter");
+        key.modifiers.shift = true;
+        for mode in
+            [TermMode::default(), TermMode::REPORT_ALTERNATE_KEYS, TermMode::REPORT_ASSOCIATED_TEXT]
+        {
+            for text in [None, Some("\r"), Some("\n")] {
+                key.key_char = text.map(str::to_owned);
+                assert_eq!(encode(&key, &mode), Some(b"\n".to_vec()), "{key:?} {mode:?}");
+                assert!(preserves_enter_modifiers(&key, &mode), "newline must not commit history");
+            }
+        }
+    }
+
+    #[test]
+    fn legacy_enter_chords_distinguish_newline_from_submit() {
         for mode in
             [TermMode::default(), TermMode::REPORT_ALTERNATE_KEYS, TermMode::REPORT_ASSOCIATED_TEXT]
         {
@@ -637,15 +682,24 @@ mod tests {
                 (true, false, false),
                 (false, true, false),
                 (false, false, true),
+                (true, true, false),
+                (true, false, true),
                 (true, true, true),
             ] {
                 let mut key = keystroke("enter");
                 key.modifiers.shift = shift;
                 key.modifiers.control = control;
                 key.modifiers.alt = alt;
-                let expected: &[u8] = if alt { b"\x1b\r" } else { b"\r" };
+                let newline = shift && !control && !alt;
+                let expected: &[u8] = if alt {
+                    b"\x1b\r"
+                } else if newline {
+                    b"\n"
+                } else {
+                    b"\r"
+                };
                 assert_eq!(encode(&key, &mode).as_deref(), Some(expected));
-                assert!(!preserves_enter_modifiers(&key, &mode));
+                assert_eq!(preserves_enter_modifiers(&key, &mode), newline);
             }
         }
     }
@@ -695,15 +749,17 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn win32_enter_keeps_native_characters_and_modifier_bits_in_both_records() {
+    fn win32_enter_keeps_native_key_identity_and_character() {
         let mode = TermMode::WIN32_INPUT_MODE;
         for (shift, control, alt, text, character, flags) in [
             (false, false, false, None, 13, 0),
             (true, false, false, None, 13, 16),
             (true, false, false, Some("\r"), 13, 16),
+            (true, false, false, Some("\n"), 10, 16),
             (false, true, false, None, 10, 8),
             (false, true, false, Some("\n"), 10, 8),
             (false, false, true, Some("\r"), 13, 2),
+            (true, false, true, Some("\r"), 13, 18),
             (true, true, false, Some("\n"), 10, 24),
         ] {
             let mut key = keystroke("enter");
@@ -730,12 +786,32 @@ mod tests {
                 assert_eq!(record.len(), 6);
                 assert_eq!(record[0], 13, "VK_RETURN");
                 assert_ne!(record[1], 0, "native scan code");
-                assert_eq!(record[2], character, "keep WM_CHAR and the CR fallback");
+                assert_eq!(record[2], character, "native records preserve WM_CHAR");
                 assert_eq!(record[3], u16::from(index == 0));
                 assert_eq!(record[4], flags, "Shift/Ctrl/Alt are carried in Cs");
                 assert_eq!(record[5], 1);
             }
             assert_eq!(preserves_enter_modifiers(&key, &mode), flags != 0);
+        }
+    }
+
+    #[test]
+    fn claude_newline_fallback_preserves_codex_and_negotiated_protocols() {
+        let key = Keystroke::parse("shift-enter").unwrap();
+        let mode = TermMode::WIN32_INPUT_MODE;
+        for program in ["claude", "claude-code"] {
+            assert_eq!(encode_for_program(&key, &mode, Some(program)), Some(b"\n".to_vec()));
+            assert_eq!(
+                encode_for_program(&key, &(mode | TermMode::DISAMBIGUATE_ESC_CODES), Some(program)),
+                Some(b"\x1b[13;2u".to_vec())
+            );
+        }
+        for program in [None, Some("codex"), Some("pwsh")] {
+            assert_eq!(encode_for_program(&key, &mode, program), encode(&key, &mode));
+        }
+        for chord in ["enter", "ctrl-enter", "alt-enter", "ctrl-shift-enter"] {
+            let key = Keystroke::parse(chord).unwrap();
+            assert_eq!(encode_for_program(&key, &mode, Some("claude")), encode(&key, &mode));
         }
     }
 
@@ -909,7 +985,7 @@ mod tests {
         );
         let mut parser: Processor = Processor::new();
         // Captured from AGY 1.1.7's outer ConPTY stream before authentication.
-        // The host's 9001 mode must not override the later Kitty negotiation.
+        // The host's 9001 mode must not override the later CSI-u negotiation.
         parser.advance(&mut term, b"\x1b[?9001h\x1b[=0;1u\x1b[=1;1u\x1b[?u");
         assert!(term.mode().contains(TermMode::WIN32_INPUT_MODE));
         assert_eq!(
@@ -955,7 +1031,7 @@ mod tests {
         let mut ctrl_enter = keystroke("enter");
         ctrl_enter.modifiers.control = true;
 
-        assert_eq!(encode(&shift_enter, term.mode()), Some(b"\r".to_vec()));
+        assert_eq!(encode(&shift_enter, term.mode()), Some(b"\n".to_vec()));
         // Codex 0.153.4 requests disambiguation, event types and alternate keys.
         parser.advance(&mut term, b"\x1b[>7u\x1b[?u");
         assert_eq!(*term.mode() & TermMode::KITTY_KEYBOARD_PROTOCOL, pi_keyboard_mode());
@@ -964,8 +1040,8 @@ mod tests {
         assert_eq!(encode(&keystroke("enter"), term.mode()), Some(b"\r".to_vec()));
 
         parser.advance(&mut term, b"\x1b[<u\x1b[?u");
-        assert_eq!(encode(&shift_enter, term.mode()), Some(b"\r".to_vec()));
-        assert!(!preserves_enter_modifiers(&shift_enter, term.mode()));
+        assert_eq!(encode(&shift_enter, term.mode()), Some(b"\n".to_vec()));
+        assert!(preserves_enter_modifiers(&shift_enter, term.mode()));
         parser.advance(&mut term, b"\x1b[>7u\x1b[=0u\x1b[?u");
         assert_eq!(encode(&ctrl_enter, term.mode()), Some(b"\r".to_vec()));
         assert_eq!(recorder.0.borrow().as_slice(), ["\x1b[?7u", "\x1b[?0u", "\x1b[?0u"]);

@@ -24,12 +24,14 @@ pub(crate) mod file_preview;
 pub mod fonts;
 #[cfg(all(windows, feature = "gpui-shell"))]
 pub(crate) mod keyboard;
+pub(crate) mod local_paths;
 pub mod notifications;
 pub(crate) mod pi_session;
 pub(crate) mod process;
 pub(crate) mod process_snapshot;
 pub mod shell;
 pub mod shell_integration;
+pub(crate) mod ssh_agent;
 pub mod startup;
 pub(crate) mod update_installation;
 #[cfg(feature = "gpui-shell")]
