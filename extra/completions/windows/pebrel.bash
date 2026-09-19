@@ -3887,7 +3887,7 @@ _pebrel() {
             fi
             case "${prev}" in
                 --ssh)
-                    COMPREPLY=()
+                    COMPREPLY=($(compgen -f "${cur}"))
                     return 0
                     ;;
                 *)
