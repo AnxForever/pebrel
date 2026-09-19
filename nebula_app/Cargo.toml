@@ -134,8 +134,6 @@ zeroize = "1"
 winit = { version = "0.30.9", default-features = false, features = ["rwh_06", "serde"] }
 global-hotkey = "0.8.0"
 getrandom = "0.3.3"
-pollster = { version = "0.4", optional = true }
-wgpu = { version = "25.0.2", optional = true }
 regex = "1.13.1"
 # `image` 被 GPUI 壳的壁纸、文档 tab、行内图片、数学视图无条件使用，必须是
 # 无条件依赖；此前按 `cfg(not(target_os = "macos"))` 排除会让 macOS 目标在
@@ -288,7 +286,6 @@ wayland = [
     "winit/wayland-csd-adwaita",
 ]
 nightly = []
-wgpu-foundation = ["dep:pollster", "dep:wgpu"]
 # GPUI UI 层（产品代码在 src/gpui_shell/），也是默认与正式发布 UI。
 # `--gpui` 作为兼容参数保留；旧壳只存在于显式 `legacy-shell` 构建。
 gpui-shell = [
