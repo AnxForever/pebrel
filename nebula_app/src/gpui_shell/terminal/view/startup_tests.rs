@@ -13,7 +13,9 @@ impl Render for Surface {
     }
 }
 
-fn open(cx: &mut TestAppContext) -> (Entity<TerminalView>, &mut VisualTestContext, Receiver<Msg>) {
+pub(super) fn open(
+    cx: &mut TestAppContext,
+) -> (Entity<TerminalView>, &mut VisualTestContext, Receiver<Msg>) {
     cx.update(|cx| {
         gpui_component::init(cx);
         cx.set_global(Settings::load(nebula_settings::ThemeName::Nord));
@@ -52,7 +54,7 @@ fn open(cx: &mut TestAppContext) -> (Entity<TerminalView>, &mut VisualTestContex
     (view, window, receiver)
 }
 
-fn feed(view: &mut TerminalView, bytes: &[u8]) {
+pub(super) fn feed(view: &mut TerminalView, bytes: &[u8]) {
     let mut term = view.session.as_ref().unwrap().term.lock();
     let mut parser = nebula_terminal::vte::ansi::Processor::<
         nebula_terminal::vte::ansi::StdSyncHandler,

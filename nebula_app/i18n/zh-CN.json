@@ -748,5 +748,10 @@
     "restore_failed": "此 AI 对话未能恢复，原恢复记录已保留。可在标签菜单中重试恢复，或到历史会话中定位。",
     "restore_ambiguous": "有多个原生会话文件匹配此对话，原恢复记录已保留。请在历史会话中选择准确的对话。",
     "retry": "重试会话恢复"
-  }
+  },
+  "ssh.agent.unavailable": "未能在探测时限内访问系统 SSH Agent。",
+  "ssh.agent.empty": "SSH Agent 没有返回任何身份。",
+  "ssh.agent.rejected": "服务器拒绝了 SSH Agent 身份（已尝试 {attempted} 个，共返回 {available} 个）。",
+  "ssh.agent.partial": "SSH Agent 身份已通过，但仍需其他认证因素（已尝试 {attempted} 个，共返回 {available} 个）。",
+  "ssh.agent.fatal": "SSH Agent 认证或签名失败，已弃用本次连接。请检查 Agent 后重新连接。{detail}"
 }

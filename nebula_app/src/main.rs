@@ -275,6 +275,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         Some(Subcommands::NotifyTest) => std::process::exit(crate::notify::notify_test()),
         #[cfg(windows)]
         Some(Subcommands::SetupAi(options)) => {
+            if let Some(destination) = &options.ssh {
+                std::process::exit(crate::ssh_session::setup_ai_cli(destination, options.remove));
+            }
             std::process::exit(crate::ai_hook::setup_ai_cli(options.remove))
         },
         #[cfg(windows)]

@@ -16,15 +16,18 @@ impl SessionRecovery {
         self.resolving || (self.awaiting_confirmation && !self.submitted && !self.failed)
     }
 
-    pub(super) fn confirm(&mut self, mut target: crate::session::AgentSession) -> bool {
-        if self.awaiting_confirmation
+    pub(super) fn accepts(&self, target: &crate::session::AgentSession) -> bool {
+        !(self.awaiting_confirmation
             && self.target.as_ref().is_some_and(|expected| {
                 expected.source != target.source
                     || (expected.session_id.is_some() && expected.session_id != target.session_id)
                     || (expected.session_file.is_some()
                         && expected.session_file != target.session_file)
-            })
-        {
+            }))
+    }
+
+    pub(super) fn confirm(&mut self, mut target: crate::session::AgentSession) -> bool {
+        if !self.accepts(&target) {
             return false;
         }
         if let Some(previous) = &self.target
@@ -265,9 +268,7 @@ impl TerminalView {
             // Submission is not a provider acknowledgement. Keep the recovery
             // target durable, and publish live identity only after a hook/probe.
             self.ai_session = None;
-            self.agent_status = crate::ai_agents::AgentStatus::Working;
-            self.agent_status_source = crate::ai_agents::AgentStatusSource::Process;
-            self.agent_turn_active = false;
+            self.agent_activity.begin_command(true);
         }
         cx.emit(TerminalViewEvent::TitleChanged);
         cx.notify();
