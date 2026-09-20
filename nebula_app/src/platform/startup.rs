@@ -6,6 +6,12 @@ pub(crate) fn report_error(error: &dyn std::fmt::Display, gui_launch: bool) {
     let _ = (error, gui_launch);
 }
 
+#[cfg(windows)]
+mod console;
+
+#[cfg(windows)]
+pub(crate) use console::prepare_console_for_gui;
+
 pub fn prepare_gui() {
     #[cfg(target_os = "macos")]
     {
