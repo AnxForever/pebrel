@@ -206,6 +206,7 @@ pub struct SettingsPane {
     font_picker_trigger_bounds: Option<gpui::Bounds<gpui::Pixels>>,
     /// 备份类别选择（本地 UI 态；出厂默认 = 共享 `BackupSelection::default`）。
     backup_selection: crate::encrypted_backup::BackupSelection,
+    backup_ui: backup::BackupUiState,
     /// 备份密码（masked；只在导出/恢复动作瞬时读取，不落任何配置）。
     backup_pass_input: Entity<InputState>,
     backup_status: Option<BackupStatus>,
@@ -1305,7 +1306,7 @@ impl SettingsPane {
         .into_any_element()
     }
 
-    fn render_nav(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
+    fn render_nav(&self, window: &Window, cx: &mut Context<Self>) -> gpui::AnyElement {
         use gpui::IntoElement as _;
         let language = crate::gpui_shell::config::ui_language(cx);
         let theme = cx.theme();
@@ -1335,7 +1336,7 @@ impl SettingsPane {
                 div()
                     .id("settings-back")
                     .mx_1()
-                    .mb(px(20.0))
+                    .mb(px(10.0))
                     .h(px(SETTINGS_NAV_ROW_HEIGHT))
                     .px(px(10.0))
                     .flex()
@@ -1348,7 +1349,8 @@ impl SettingsPane {
                     .on_click(cx.listener(|_, _, _, cx| cx.emit(SettingsPaneEvent::Close)))
                     .child(Icon::new(IconName::ArrowLeft).size(px(SETTINGS_NAV_ICON_SIZE)))
                     .child(language.pick("返回工作区", "Back to workspace")),
-            );
+            )
+            .child(self.render_nav_search(window, cx));
         for ix in self.matching_settings_sections(cx) {
             let active = ix == self.active_section;
             nav = nav.child(
@@ -1414,7 +1416,8 @@ impl Focusable for SettingsPane {
 
 impl Render for SettingsPane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let nav = self.render_nav(cx);
+        crate::gpui_shell::theme::sync_component_focus_ring(window, cx);
+        let nav = self.render_nav(window, cx);
         let content = self.section_content(window, cx);
         // 这里**不再**挂 font_family。旧壳设置页整页走终端 mono，是因为自绘
         // 只有一套字形缓存；GPUI 壳没有这个限制，继承那个观感只会让中文说明
@@ -1429,7 +1432,6 @@ impl Render for SettingsPane {
         let theme_editor_modal = self.theme_editor_modal(window, cx);
         let theme_transfer_modal = self.theme_transfer_modal(window, cx);
         let application_page = self.active_section == 0;
-        let header = self.render_search_header(window, cx);
 
         div()
             .size_full()
@@ -1484,9 +1486,6 @@ impl Render for SettingsPane {
                     .flex_1()
                     .min_w_0()
                     .h_full()
-                    // 页头固定高度；正文单独滚动，滚动设置时仍能知道
-                    // 自己在哪个分区，也不会让标题与首组的距离随内容变化。
-                    .child(header)
                     .child(
                         v_flex()
                             .flex_1()
