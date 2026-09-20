@@ -131,7 +131,15 @@ pub(crate) fn nebula_prompt_line_from_raw_grid<T: EventListener>(
     typed_tail: &str,
     env: &SuggestEnv,
 ) -> Option<PromptLineSnapshot> {
-    let text = raw_grid_logical_line(terminal, cursor)?;
+    let input_start = terminal.nebula_prompt_input_point();
+    let (text, boundary) = raw_grid_line_with_boundary(terminal, cursor, input_start)?;
+    if let Some(boundary) = boundary {
+        let (prompt, input) = text.split_at(boundary);
+        return Some(PromptLineSnapshot { prompt: prompt.to_owned(), input: input.to_owned() });
+    }
+    if input_start.is_some() {
+        return None;
+    }
     prompt_line_snapshot(&text, typed_tail, env, terminal.nebula_prompt_active())
 }
 
@@ -141,12 +149,17 @@ pub(crate) fn nebula_shell_ready_from_raw_grid<T: EventListener>(
     terminal: &Term<T>,
     env: &SuggestEnv,
 ) -> bool {
+    if let Some(line) = nebula_prompt_line_from_raw_grid(
+        terminal,
+        terminal.grid().cursor.point,
+        "",
+        env,
+    ) {
+        return line.input.trim().is_empty();
+    }
     let Some(text) = raw_grid_logical_line(terminal, terminal.grid().cursor.point) else {
         return false;
     };
-    if let Some(line) = prompt_line_snapshot(&text, "", env, terminal.nebula_prompt_active()) {
-        return line.input.trim().is_empty();
-    }
     let prompt = text.trim_end();
     let Some(marker) = prompt.chars().next_back() else { return false };
     safe_shell_prompt_marker(prompt, marker, env)
@@ -158,12 +171,23 @@ pub(crate) fn nebula_shell_prompt_restored_from_raw_grid<T: EventListener>(
     expected_prompt: &str,
     env: &SuggestEnv,
 ) -> bool {
+    if terminal.mode().intersects(nebula_terminal::term::TermMode::ALT_SCREEN) {
+        return false;
+    }
     let cursor = terminal.grid().cursor.point;
     raw_grid_logical_line(terminal, cursor)
         .is_some_and(|line| shell_prompt_restored(expected_prompt, &line, env))
 }
 
 fn raw_grid_logical_line<T: EventListener>(terminal: &Term<T>, cursor: Point) -> Option<String> {
+    raw_grid_line_with_boundary(terminal, cursor, None).map(|(text, _)| text)
+}
+
+fn raw_grid_line_with_boundary<T: EventListener>(
+    terminal: &Term<T>,
+    cursor: Point,
+    input_start: Option<Point>,
+) -> Option<(String, Option<usize>)> {
     let grid = terminal.grid();
     if !raw_grid_line_is_readable(cursor.line, grid.topmost_line(), grid.bottommost_line()) {
         return None;
@@ -198,9 +222,13 @@ fn raw_grid_logical_line<T: EventListener>(terminal: &Term<T>, cursor: Point) ->
     }
 
     let mut text = String::with_capacity(columns);
+    let mut boundary = None;
     for row in first_row..=cursor.line.0 {
         let row_end = if row == cursor.line.0 { cursor_col } else { columns };
         for col in 0..row_end {
+            if input_start == Some(Point::new(Line(row), Column(col))) {
+                boundary = Some(text.len());
+            }
             let cell: &Cell = &grid[Line(row)][Column(col)];
             if cell.flags.intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER) {
                 continue;
@@ -209,7 +237,10 @@ fn raw_grid_logical_line<T: EventListener>(terminal: &Term<T>, cursor: Point) ->
         }
     }
 
-    Some(text)
+    if input_start == Some(cursor) {
+        boundary = Some(text.len());
+    }
+    Some((text, boundary))
 }
 
 fn prompt_line_snapshot(
@@ -225,6 +256,13 @@ fn prompt_line_snapshot(
             prompt: text[..prompt_end].trim_end().to_owned(),
             input: input.strip_prefix(' ').unwrap_or(input).to_owned(),
         });
+    }
+    // CMD history recall and completion need not update the keystroke mirror.
+    if matches!(env, SuggestEnv::Local)
+        && let Some((head, input)) = text.split_once('>')
+        && cmd_path_prompt(head)
+    {
+        return Some(PromptLineSnapshot { prompt: format!("{head}>"), input: input.to_owned() });
     }
     if typed_tail.is_empty() || !text.ends_with(typed_tail) {
         return None;
@@ -249,10 +287,26 @@ fn shell_prompt_restored(expected_prompt: &str, current_line: &str, env: &Sugges
         return true;
     }
 
+    if matches!(env, SuggestEnv::Local)
+        && expected.strip_suffix('>').is_some_and(cmd_path_prompt)
+        && current.strip_suffix('>').is_some_and(cmd_path_prompt)
+    {
+        return true;
+    }
+
     !env.is_this_machine()
         && remote_prompt_anchor(expected, marker)
             .zip(remote_prompt_anchor(current, marker))
             .is_some_and(|(expected, current)| expected == current)
+}
+
+fn cmd_path_prompt(head: &str) -> bool {
+    let bytes = head.as_bytes();
+    bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && bytes[2] == b'\\'
+        && !head.contains(['<', '>', '|', '\r', '\n'])
 }
 
 fn safe_shell_prompt_marker(prompt: &str, marker: char, env: &SuggestEnv) -> bool {
