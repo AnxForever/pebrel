@@ -2,7 +2,10 @@ use super::*;
 use gpui::{TestAppContext, VisualTestContext};
 use gpui_component::Root;
 
-fn open(path: PathBuf, cx: &mut TestAppContext) -> (Entity<TextFileView>, VisualTestContext) {
+pub(super) fn open(
+    path: PathBuf,
+    cx: &mut TestAppContext,
+) -> (Entity<TextFileView>, VisualTestContext) {
     cx.update(|cx| {
         gpui_component::init(cx);
         super::super::math_view::register(cx);
@@ -107,24 +110,23 @@ fn outline_arrow_folds_without_navigating_or_rewriting_the_document(cx: &mut Tes
 }
 
 #[gpui::test]
-fn document_chrome_modes_are_idempotent_and_sidebar_tabs_are_exclusive(cx: &mut TestAppContext) {
+fn document_opens_editable_and_source_shortcut_preserves_draft_and_details(
+    cx: &mut TestAppContext,
+) {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("chrome.md");
     let source = "# Title\n\nOriginal text\n";
     std::fs::write(&path, source).unwrap();
     let (file, mut cx) = open(path, cx);
-    for (selector, preview) in [
-        ("file-mode-read", true),
-        ("file-mode-edit", false),
-        ("file-mode-edit", false),
-        ("file-mode-read", true),
-    ] {
+    assert!(file.read_with(&cx, |view, _| view.preview && view.live_mode));
+    cx.update(|window, cx| file.read(cx).focus.clone().focus(window, cx));
+    for preview in [false, true, false, true] {
         cx.update(|window, cx| {
             let _ = window.draw(cx);
         });
-        let point = cx.debug_bounds(selector).unwrap().center();
-        cx.simulate_mouse_down(point, MouseButton::Left, gpui::Modifiers::default());
-        cx.simulate_mouse_up(point, MouseButton::Left, gpui::Modifiers::default());
+        assert!(cx.debug_bounds("file-mode-read").is_none());
+        assert!(cx.debug_bounds("file-mode-live").is_none());
+        cx.simulate_keystrokes("ctrl-/");
         cx.run_until_parked();
         assert_eq!(file.read_with(&cx, |view, _| view.preview), preview);
         assert_eq!(file.read_with(&cx, |view, cx| view.input.read(cx).value().to_string()), source);
@@ -199,7 +201,11 @@ fn code_actions_copy_raw_source_and_search_languages(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("enter");
     cx.run_until_parked();
     assert!(file.read_with(&cx, |view, _| view.outline.block_source(0).starts_with("```rust")));
-    assert_eq!(file.read_with(&cx, |view, cx| view.input.read(cx).value().to_string()), source);
+    assert_eq!(
+        file.read_with(&cx, |view, cx| view.input.read(cx).value().to_string()),
+        source.replacen("```text", "```rust", 1)
+    );
+    assert!(file.read_with(&cx, |view, _| view.dirty));
 }
 
 #[gpui::test]

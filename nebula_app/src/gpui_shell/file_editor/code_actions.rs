@@ -220,6 +220,7 @@ fn standalone_markdown(code: &CodeSpec) -> String {
 
 impl CodeLanguage {
     fn toggle(&mut self, _: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
+        cx.stop_propagation();
         if self.open {
             self.close(window, cx);
         } else {
@@ -387,6 +388,18 @@ pub(super) fn render(
     window: &mut Window,
     cx: &mut App,
 ) -> gpui::AnyElement {
+    render_with_input(owner, block, code, hover_group, None, window, cx)
+}
+
+pub(super) fn render_with_input(
+    owner: gpui::WeakEntity<TextFileView>,
+    block: usize,
+    code: CodeSpec,
+    hover_group: SharedString,
+    input: Option<gpui::AnyElement>,
+    window: &mut Window,
+    cx: &mut App,
+) -> gpui::AnyElement {
     let language = super::super::config::ui_language(cx);
     let markdown = standalone_markdown(&code);
     let plain = SharedString::from(language.text(Message::MarkdownPlainText));
@@ -431,7 +444,7 @@ pub(super) fn render(
                                 let choice =
                                     if choice == state.plain { "" } else { choice.as_ref() };
                                 let _ = owner.update(cx, |view, cx| {
-                                    view.set_preview_language(block, start, end, choice, cx)
+                                    view.set_preview_language(block, start, end, choice, window, cx)
                                 });
                             }
                         }
@@ -509,17 +522,29 @@ pub(super) fn render(
         .w_full()
         .min_w_0()
         .debug_selector(|| "pebrel-code-block".to_owned())
-        .child(
-            div().w_full().min_w_0().debug_selector(|| "pebrel-code-text".to_owned()).child(
+        .child(div().w_full().min_w_0().debug_selector(|| "pebrel-code-text".to_owned()).child(
+            if let Some(input) = input {
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .px(px(18.0))
+                    .py(px(16.0))
+                    .rounded(px(3.0))
+                    .bg(colors.code)
+                    .text_color(colors.ink)
+                    .child(input)
+                    .into_any_element()
+            } else {
                 TextView::new(&content)
                     .w_full()
                     .min_w_0()
                     .max_w_full()
                     .selectable(true)
                     .scrollable(false)
-                    .style(style),
-            ),
-        )
+                    .style(style)
+                    .into_any_element()
+            },
+        ))
         .child(h_flex().w_full().h(px(28.0)).justify_end().child(render_language_picker(
             state.clone(),
             list,

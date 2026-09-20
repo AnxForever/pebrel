@@ -1,19 +1,35 @@
 //! Editable local text files shared by Markdown and code tabs.
 
+mod activity;
+mod block_structure;
 mod chrome;
 mod code_actions;
 #[cfg(all(test, feature = "gpui-test-support"))]
 mod code_actions_tests;
+mod details;
 mod document;
+mod edit_history;
 #[cfg(all(test, feature = "gpui-test-support"))]
 mod focus_tests;
+mod image_cache;
 mod images;
 mod info;
+mod inline_edit;
+mod input_rules;
+mod live_commands;
+mod live_edit;
+mod live_navigation;
+#[cfg(all(test, feature = "gpui-test-support"))]
+mod live_tests;
 mod outline;
 mod outline_view;
 mod preview;
 mod reader_presentation;
 mod source;
+mod structure_commands;
+#[cfg(all(test, feature = "gpui-test-support"))]
+mod structure_tests;
+mod structure_view;
 #[cfg(all(test, feature = "gpui-test-support"))]
 mod tests;
 
@@ -33,14 +49,29 @@ use gpui_component::text::TextViewState;
 use super::prelude::*;
 use crate::i18n::Message;
 use crate::ssh_sftp::document::{DocumentOperation, RemoteLocation};
+pub(super) use details::{DocumentDetails, DocumentSection};
 use document::SaveError;
 use outline::Outline;
 use source::{DocumentSource, LoadedDocument};
 
-actions!(file_editor, [SaveFile]);
+actions!(file_editor, [SaveFile, ToggleSource, FinishBlockEdit, BoldSelection, ItalicSelection]);
 
 pub(super) fn init(cx: &mut App) {
     cx.bind_keys([
+        KeyBinding::new("ctrl-/", ToggleSource, Some("FileEditor")),
+        KeyBinding::new("cmd-/", ToggleSource, Some("FileEditor")),
+        KeyBinding::new("ctrl-b", BoldSelection, Some("MarkdownLive")),
+        KeyBinding::new("cmd-b", BoldSelection, Some("MarkdownLive")),
+        KeyBinding::new("ctrl-i", ItalicSelection, Some("MarkdownLive")),
+        KeyBinding::new("cmd-i", ItalicSelection, Some("MarkdownLive")),
+        KeyBinding::new("ctrl-z", gpui_component::input::Undo, Some("FileEditor")),
+        KeyBinding::new("cmd-z", gpui_component::input::Undo, Some("FileEditor")),
+        KeyBinding::new("ctrl-shift-z", gpui_component::input::Redo, Some("FileEditor")),
+        KeyBinding::new("cmd-shift-z", gpui_component::input::Redo, Some("FileEditor")),
+        KeyBinding::new("ctrl-y", gpui_component::input::Redo, Some("FileEditor")),
+        KeyBinding::new("ctrl-enter", FinishBlockEdit, Some("MarkdownLive")),
+        KeyBinding::new("cmd-enter", FinishBlockEdit, Some("MarkdownLive")),
+        KeyBinding::new("escape", FinishBlockEdit, Some("MarkdownLive")),
         KeyBinding::new("ctrl-s", SaveFile, Some("FileEditor")),
         KeyBinding::new("cmd-s", SaveFile, Some("FileEditor")),
         KeyBinding::new("ctrl-a", gpui_component::input::SelectAll, Some("FileEditor")),
@@ -52,6 +83,7 @@ pub(super) fn init(cx: &mut App) {
 
 pub enum TextFileEvent {
     Changed,
+    DetailsRequested,
     SelectionContextMenuRequested { position: Point<Pixels>, text: String },
     ReaderFocusChanged { focused: bool },
 }
@@ -60,6 +92,7 @@ pub struct TextFileView {
     pub path: PathBuf,
     pub title: String,
     input: Entity<InputState>,
+    history: edit_history::EditHistory,
     focus: FocusHandle,
     source: DocumentSource,
     document: Option<LoadedDocument>,
@@ -70,11 +103,19 @@ pub struct TextFileView {
     notice: Option<(Message, Option<String>)>,
     markdown: bool,
     preview: bool,
+    live_mode: bool,
+    live_edit: Option<live_edit::LiveEdit>,
+    render_active: bool,
+    preview_stale: bool,
+    last_edit_cursor: Option<activity::EditCursor>,
+    resume_edit: bool,
     show_details: bool,
+    details_hosted: bool,
     info: bool,
     outline: Outline,
     blocks: Rc<RefCell<Vec<Option<Entity<TextViewState>>>>>,
     preview_extensions: gpui_component::text::MarkdownExtensions,
+    preview_images: Entity<image_cache::DocumentImageCache>,
     scroll: ListState,
     preview_bounds: Rc<RefCell<Bounds<Pixels>>>,
     preview_selection_scroll_epoch: u64,
@@ -98,7 +139,13 @@ impl EventEmitter<TextFileEvent> for TextFileView {}
 
 impl Focusable for TextFileView {
     fn focus_handle(&self, cx: &App) -> FocusHandle {
-        if self.preview { self.focus.clone() } else { self.input.read(cx).focus_handle(cx) }
+        if let Some(edit) = &self.live_edit {
+            edit.input.read(cx).focus_handle(cx)
+        } else if self.preview {
+            self.focus.clone()
+        } else {
+            self.input.read(cx).focus_handle(cx)
+        }
     }
 }
 
@@ -146,10 +193,11 @@ impl TextFileView {
         });
         let subscription = cx.subscribe_in(&input, window, |this, _, event, _, cx| {
             if matches!(event, InputEvent::Change) {
-                this.dirty = this
-                    .document
-                    .as_ref()
-                    .is_some_and(|doc| this.input.read(cx).value().as_ref() != doc.text);
+                let source = this.input.read(cx).value();
+                if this.markdown {
+                    this.history.record(&source);
+                }
+                this.dirty = this.document.as_ref().is_some_and(|doc| source.as_ref() != doc.text);
                 if this.markdown {
                     this.schedule_preview(cx);
                 }
@@ -164,10 +212,12 @@ impl TextFileView {
         };
         let preview_extensions = preview::extensions(path.parent().map(PathBuf::from));
         let mut this = Self {
+            preview_images: image_cache::DocumentImageCache::new(cx.entity_id(), cx),
             preview_extensions,
             path,
             title,
             input,
+            history: edit_history::EditHistory::default(),
             focus: cx.focus_handle(),
             source,
             document: None,
@@ -178,7 +228,14 @@ impl TextFileView {
             notice: None,
             markdown,
             preview: markdown,
+            live_mode: markdown,
+            live_edit: None,
+            render_active: true,
+            preview_stale: false,
+            last_edit_cursor: None,
+            resume_edit: false,
             show_details: markdown,
+            details_hosted: false,
             info: false,
             outline: Outline::default(),
             blocks: Rc::default(),
@@ -206,6 +263,10 @@ impl TextFileView {
 
     pub(super) fn draft(&self, cx: &App) -> SharedString {
         self.input.read(cx).value()
+    }
+
+    fn source_slice(&self, range: std::ops::Range<usize>, cx: &App) -> Option<String> {
+        self.input.read(cx).text().try_slice(range).ok().map(|slice| slice.to_string())
     }
 
     pub fn is_dirty(&self) -> bool {
@@ -310,8 +371,7 @@ impl TextFileView {
         let task = cx.background_executor().spawn(async move {
             let _permit = resources.document_permit().await;
             source.load(operation).await.map(|doc| {
-                let outline = markdown
-                    .then(|| Outline::parse(&images::rewrite_doc_images(&doc.text, path.parent())));
+                let outline = markdown.then(|| Outline::prepare(&doc.text, path.parent()));
                 (doc, outline)
             })
         });
@@ -324,6 +384,10 @@ impl TextFileView {
                     view.operation = None;
                     match loaded {
                         Ok((document, outline)) => {
+                            view.live_edit = None;
+                            view.last_edit_cursor = None;
+                            view.resume_edit = false;
+                            view.history.reset(&document.text);
                             view.input.update(cx, |input, cx| {
                                 input.set_value(document.text.clone(), window, cx)
                             });
@@ -332,6 +396,9 @@ impl TextFileView {
                             view.notice = None;
                             if let Some(outline) = outline {
                                 view.apply_outline(outline, cx);
+                            }
+                            if view.preview && view.focus.is_focused(window) {
+                                view.begin_live_edit(0, window, cx);
                             }
                         },
                         Err(error) => {
@@ -437,6 +504,11 @@ impl TextFileView {
 
     fn schedule_preview(&mut self, cx: &mut Context<Self>) {
         self.revision += 1;
+        self.preview_stale = true;
+        self.preview_task = None;
+        if !self.render_active || self.live_edit.is_some() {
+            return;
+        }
         let revision = self.revision;
         let executor = cx.background_executor().clone();
         let resources = super::scientific_render::assets(cx);
@@ -450,11 +522,11 @@ impl TextFileView {
             let outline = executor
                 .spawn(async move {
                     let _permit = resources.document_permit().await;
-                    Outline::parse(&images::rewrite_doc_images(&source, path.parent()))
+                    Outline::prepare(&source, path.parent())
                 })
                 .await;
             let _ = this.update(cx, |view, cx| {
-                if view.revision == revision {
+                if view.render_active && view.revision == revision && view.live_edit.is_none() {
                     view.apply_outline(outline, cx);
                 }
             });
@@ -462,8 +534,16 @@ impl TextFileView {
     }
 
     fn apply_outline(&mut self, outline: Outline, cx: &mut Context<Self>) {
+        self.preview_stale = false;
+        let top = self.scroll.logical_scroll_top();
         self.blocks = Rc::new(RefCell::new(vec![None; outline.blocks.len()]));
-        self.scroll.reset(outline.blocks.len());
+        self.scroll.reset(outline.blocks.len().max(usize::from(self.live_mode)));
+        if !outline.blocks.is_empty() {
+            self.scroll.scroll_to(gpui::ListOffset {
+                item_ix: top.item_ix.min(outline.blocks.len() - 1),
+                ..top
+            });
+        }
         self.outline = outline;
         self.collapsed_headings.clear();
         self.selected_heading = None;
@@ -472,7 +552,11 @@ impl TextFileView {
     }
 
     fn toggle_preview(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.finish_live_edit(cx);
         self.preview = !self.preview;
+        self.preview_images.update(cx, |images, cx| {
+            images.set_active(self.render_active && self.preview, window, cx);
+        });
         if !self.preview {
             self.stop_preview_selection_scroll();
             for block in self.blocks.borrow_mut().iter_mut() {
@@ -480,6 +564,8 @@ impl TextFileView {
             }
             self.all_selected = false;
             self.input.update(cx, |input, cx| input.focus(window, cx));
+        } else {
+            self.focus.focus(window, cx);
         }
         cx.notify();
     }
@@ -506,6 +592,7 @@ impl TextFileView {
 
 impl Render for TextFileView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.restore_edit_cursor(window, cx);
         let language = super::config::ui_language(cx);
         let muted = cx.theme().muted_foreground;
         let editable = !self.loading && self.document.as_ref().is_some_and(|doc| !doc.read_only);
@@ -582,7 +669,156 @@ impl Render for TextFileView {
             .on_action(cx.listener(|this, _: &SaveFile, _, cx| {
                 this.save(cx).detach();
             }))
-            .when(self.preview, |root| {
+            .on_action(cx.listener(|this, _: &ToggleSource, window, cx| {
+                if this.markdown {
+                    this.toggle_preview(window, cx);
+                }
+            }))
+            .when(self.markdown, |root| {
+                root.capture_action(cx.listener(
+                    |view, _: &gpui_component::input::Undo, window, cx| {
+                        if view.document_input_focused(window, cx) {
+                            view.travel_history(false, window, cx);
+                            cx.stop_propagation();
+                        } else {
+                            cx.propagate();
+                        }
+                    },
+                ))
+                .capture_action(cx.listener(|view, _: &gpui_component::input::Redo, window, cx| {
+                    if view.document_input_focused(window, cx) {
+                        view.travel_history(true, window, cx);
+                        cx.stop_propagation();
+                    } else {
+                        cx.propagate();
+                    }
+                }))
+                .capture_action(cx.listener(
+                    |view, _: &gpui_component::input::Escape, window, cx| {
+                        if view.live_edit.is_some() {
+                            view.finish_live_edit(cx);
+                            view.focus.focus(window, cx);
+                            cx.stop_propagation();
+                        } else {
+                            cx.propagate();
+                        }
+                    },
+                ))
+                .capture_action(cx.listener(
+                    |view, action: &gpui_component::input::Enter, window, cx| {
+                        if action.secondary && view.live_edit.is_some() {
+                            view.finish_live_edit(cx);
+                            view.focus.focus(window, cx);
+                            cx.stop_propagation();
+                        } else if !action.shift
+                            && (view.insert_block_on_enter(window, cx)
+                                || view.navigate_table(false, true, window, cx)
+                                || view.continue_list(window, cx)
+                                || view.split_live_paragraph(window, cx))
+                        {
+                            cx.stop_propagation();
+                        } else {
+                            cx.propagate();
+                        }
+                    },
+                ))
+                .capture_action(cx.listener(
+                    |view, _: &gpui_component::input::IndentInline, window, cx| {
+                        if view.navigate_table(false, false, window, cx)
+                            || view.indent_list(false, window, cx)
+                        {
+                            cx.stop_propagation();
+                        } else {
+                            cx.propagate();
+                        }
+                    },
+                ))
+                .capture_action(cx.listener(
+                    |view, _: &gpui_component::input::OutdentInline, window, cx| {
+                        if view.navigate_table(true, false, window, cx)
+                            || view.indent_list(true, window, cx)
+                        {
+                            cx.stop_propagation();
+                        } else {
+                            cx.propagate();
+                        }
+                    },
+                ))
+                .capture_action(cx.listener(
+                    |view, _: &gpui_component::input::MoveLeft, window, cx| {
+                        if view.move_live_edge(true, false, window, cx) {
+                            cx.stop_propagation();
+                        } else {
+                            cx.propagate();
+                        }
+                    },
+                ))
+                .capture_action(cx.listener(
+                    |view, _: &gpui_component::input::MoveRight, window, cx| {
+                        if view.move_live_edge(false, false, window, cx) {
+                            cx.stop_propagation();
+                        } else {
+                            cx.propagate();
+                        }
+                    },
+                ))
+                .capture_action(cx.listener(
+                    |view, _: &gpui_component::input::MoveUp, window, cx| {
+                        if view.move_live_edge(true, false, window, cx) {
+                            cx.stop_propagation();
+                        } else {
+                            cx.propagate();
+                        }
+                    },
+                ))
+                .capture_action(cx.listener(
+                    |view, _: &gpui_component::input::MoveDown, window, cx| {
+                        if view.move_live_edge(false, false, window, cx) {
+                            cx.stop_propagation();
+                        } else {
+                            cx.propagate();
+                        }
+                    },
+                ))
+                .capture_action(cx.listener(
+                    |view, _: &gpui_component::input::MoveToStart, window, cx| {
+                        if view.move_live_edge(true, true, window, cx) {
+                            cx.stop_propagation();
+                        } else {
+                            cx.propagate();
+                        }
+                    },
+                ))
+                .capture_action(cx.listener(
+                    |view, _: &gpui_component::input::MoveToEnd, window, cx| {
+                        if view.move_live_edge(false, true, window, cx) {
+                            cx.stop_propagation();
+                        } else {
+                            cx.propagate();
+                        }
+                    },
+                ))
+                .capture_action(cx.listener(
+                    |view, _: &gpui_component::input::Backspace, window, cx| {
+                        if view.backspace_list(window, cx) || view.join_live_paragraph(window, cx) {
+                            cx.stop_propagation();
+                        } else {
+                            cx.propagate();
+                        }
+                    },
+                ))
+            })
+            .on_action(cx.listener(|this, _: &FinishBlockEdit, window, cx| {
+                this.finish_live_edit(cx);
+                this.focus.focus(window, cx);
+            }))
+            .on_action(cx.listener(|view, _: &BoldSelection, window, cx| {
+                view.format_live_selection("**", window, cx);
+            }))
+            .on_action(cx.listener(|view, _: &ItalicSelection, window, cx| {
+                view.format_live_selection("_", window, cx);
+            }))
+            .when(self.preview && self.live_edit.is_none(), |root| {
                 root.capture_action(cx.listener(
                     |this, _: &gpui_component::input::SelectAll, _, cx| {
                         for block in this.blocks.borrow().iter().flatten() {
@@ -616,7 +852,7 @@ impl Render for TextFileView {
                 root.child(div().px_3().py_1().text_xs().text_color(muted).child(notice))
             })
             .child(h_flex().flex_1().min_h_0().w_full().items_start().child(content).when(
-                self.show_details,
+                self.show_details && !self.details_hosted,
                 |row| {
                     row.child(if self.info {
                         self.render_info(cx)

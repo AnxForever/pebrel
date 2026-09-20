@@ -309,7 +309,6 @@ impl NebulaWorkspace {
         // 滚动只由 uniform_list 承担。旧壳那套行粒度 `scroll` 不再参与，否则
         // `click_row` 的 `scroll + index` 会把点击算到别的行上。
         self.side_panel.scroll = 0;
-        let view_switch = self.render_side_panel_switch(cx).into_any_element();
         let theme = cx.theme();
         let muted = theme.muted_foreground;
         let language = super::workspace_ui_language();
@@ -433,12 +432,12 @@ impl NebulaWorkspace {
 
         v_flex()
             .h_full()
-            .w(px(320.0))
+            .w_full()
+            .min_w_0()
             .flex_shrink_0()
             .p_2()
             .gap_2()
             .occlude()
-            .child(view_switch)
             .child(
                 h_flex()
                     .h(px(30.0))
@@ -524,16 +523,6 @@ impl NebulaWorkspace {
                                 // custom root 会继续压住当前终端，按钮只会刷新旧目录。
                                 this.sync_side_panel_to_active(true, cx);
                                 cx.notify();
-                            })),
-                    )
-                    .child(
-                        Button::new("file-tree-close")
-                            .icon(IconName::Close)
-                            .ghost()
-                            .xsmall()
-                            .tooltip("关闭目录树 (Ctrl+Shift+F)")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.toggle_file_tree(cx);
                             })),
                     ),
             )

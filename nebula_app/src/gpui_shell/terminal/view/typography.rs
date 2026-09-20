@@ -12,14 +12,24 @@ use nebula_settings::CellWidthModeName;
 use super::Settings;
 use crate::font_install::{REQUIRED_FONT_FAMILY, gpui_font_with_fallbacks};
 
-/// GPUI's Windows backend skips font feature setup for an empty feature list.
-/// Explicitly enabling `calt` keeps Maple's contextual ligatures consistent
-/// across the platforms where the bundled face is used.
-pub(super) fn mono_font(family: &str, weight: FontWeight, style: FontStyle) -> Font {
+/// Set every ligature feature explicitly, including the off case: platform
+/// defaults differ, and the Windows backend ignores an empty feature list.
+pub(super) fn mono_font(
+    family: &str,
+    weight: FontWeight,
+    style: FontStyle,
+    ligatures: bool,
+) -> Font {
+    let enabled = u32::from(ligatures);
     Font {
         weight,
         style,
-        features: FontFeatures(std::sync::Arc::new(vec![("calt".to_owned(), 1)])),
+        features: FontFeatures(std::sync::Arc::new(vec![
+            ("calt".to_owned(), enabled),
+            ("liga".to_owned(), enabled),
+            ("clig".to_owned(), enabled),
+            ("kern".to_owned(), 0),
+        ])),
         ..gpui_font_with_fallbacks(family)
     }
 }
@@ -85,7 +95,7 @@ fn measure_cell_metrics(
     offset_y: f32,
     line_height_multiplier: Option<f32>,
 ) -> (Pixels, Pixels) {
-    let font = mono_font(family, FontWeight::NORMAL, FontStyle::Normal);
+    let font = mono_font(family, FontWeight::NORMAL, FontStyle::Normal, false);
     let sample = window.text_system().shape_line(
         SharedString::new_static("M"),
         font_size,

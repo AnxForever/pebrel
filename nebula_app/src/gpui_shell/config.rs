@@ -49,6 +49,7 @@ pub struct Settings {
     pub font_bold_italic_family: String,
     /// GPUI 逻辑像素（配置里是 pt，1pt = 4/3 px @96dpi）。
     pub font_size_px: f32,
+    pub ligatures: bool,
     /// 配置文件的基准字号，不含设置页/Ctrl+滚轮持久化的终端缩放。
     /// 启动窗口按它定形，和旧壳的 `window_size` 契约一致。
     pub base_font_size_px: f32,
@@ -81,6 +82,8 @@ pub struct Settings {
     pub dim_inactive_panes: bool,
     /// Cached in-app toast preference, independent of native system notifications.
     pub ai_toasts: bool,
+    /// Cached display lifetime; toast delivery and native notifications are independent.
+    pub notification_duration: nebula_settings::NotificationDuration,
     /// 标签关闭按钮与标签插入动画都在渲染热路径读取，必须随全局设置驻留内存。
     pub tab_close_visible: bool,
     pub tab_reveal: nebula_settings::TabRevealName,
@@ -249,6 +252,9 @@ impl Settings {
             font_italic_family: secondary(&raw.font.italic),
             font_bold_italic_family: secondary(&raw.font.bold_italic),
             font_size_px,
+            ligatures: runtime
+                .ligatures
+                .enabled(resolved_theme.typography().map(|typography| typography.ligatures)),
             base_font_size_px,
             ui_font_size_px: runtime.ui_font_size_px.unwrap_or(base_font_size_px),
             ui_font_family: runtime.ui_font_family.clone(),
@@ -275,6 +281,7 @@ impl Settings {
                 .unwrap_or(raw.mouse.focus_follows_mouse),
             dim_inactive_panes: runtime.dim_inactive_panes,
             ai_toasts: runtime.ai_toasts,
+            notification_duration: runtime.notification_duration,
             tab_close_visible: runtime.tab_close_visible,
             tab_reveal: runtime.tab_reveal,
             ghost: runtime.ghost,

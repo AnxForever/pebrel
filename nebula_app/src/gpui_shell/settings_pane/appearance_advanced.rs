@@ -127,6 +127,12 @@ impl SettingsPane {
             )
             .child(self.font_size_row(false, cx))
             .child(self.select_row(
+                "ligatures",
+                language.text(crate::i18n::Message::SettingsFontLigatures),
+                language.text(crate::i18n::Message::SettingsFontLigaturesDescription),
+                cx,
+            ))
+            .child(self.select_row(
                 "cell_width_mode",
                 language.pick("字体间距", "Character spacing"),
                 help("cell_width_mode", language),
