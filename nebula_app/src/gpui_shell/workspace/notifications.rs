@@ -100,7 +100,7 @@ impl NebulaWorkspace {
                     kind,
                     text,
                     pane_id,
-                    notification.is_ai(),
+                    &notification,
                 );
             }
         }
