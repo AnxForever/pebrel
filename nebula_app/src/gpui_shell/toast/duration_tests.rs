@@ -45,6 +45,34 @@ fn settle_dismissal(cx: &mut VisualTestContext) {
 }
 
 #[gpui::test]
+fn pane_result_replacement_preserves_other_panes_and_uses_the_selected_duration(
+    cx: &mut TestAppContext,
+) {
+    let mut window = open(NotificationDuration::FiveSeconds, cx);
+    let old = window.update(|window, cx| {
+        banner_for_pane(window, cx, ToastKind::Warning, "Overloaded", 83001, true);
+        let old = window.notifications(cx)[0].clone();
+        banner_for_pane(window, cx, ToastKind::Info, "Other pane", 83002, true);
+        old
+    });
+    let original = ids(&mut window);
+    advance(&mut window, Duration::from_secs(4));
+    window.update(|window, cx| {
+        banner_for_pane(window, cx, ToastKind::Info, "Recovered", 83001, true);
+    });
+    let replaced = ids(&mut window);
+    assert_eq!(replaced.len(), 2);
+    assert_eq!(replaced[0], original[1]);
+    assert_ne!(replaced[1], old.entity_id());
+    advance(&mut window, Duration::from_secs(1));
+    settle_dismissal(&mut window);
+    assert_eq!(ids(&mut window), vec![replaced[1]]);
+    advance(&mut window, Duration::from_secs(4));
+    settle_dismissal(&mut window);
+    assert!(ids(&mut window).is_empty());
+}
+
+#[gpui::test]
 fn every_timed_mode_expires_at_its_selected_duration_without_activating_actions(
     cx: &mut TestAppContext,
 ) {

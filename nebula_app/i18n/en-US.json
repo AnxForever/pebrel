@@ -1,4 +1,11 @@
 {
+  "notification": {
+    "bell": "Terminal bell",
+    "turn_failed_reason": "Request failed: {error}",
+    "turn_failed": "Request failed. Check the terminal for details.",
+    "turn_incomplete": "Response incomplete. Check the terminal before continuing.",
+    "turn_ended": "Turn ended. Check the terminal for the result."
+  },
   "language": {
     "self_name": "English",
     "system": "Follow system",

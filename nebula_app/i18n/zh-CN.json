@@ -1,4 +1,11 @@
 {
+  "notification": {
+    "bell": "终端响铃",
+    "turn_failed_reason": "请求失败：{error}",
+    "turn_failed": "请求失败，请查看终端中的错误详情。",
+    "turn_incomplete": "回复未完成，请查看终端后再继续。",
+    "turn_ended": "回合已结束，请查看终端中的结果。"
+  },
   "language": {
     "self_name": "简体中文",
     "system": "跟随系统",
