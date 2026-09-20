@@ -285,6 +285,7 @@ impl TerminalView {
             cursor_blink_epoch: 0,
             cursor_window_active,
             cursor_pane_focused,
+            output_visible: true,
             _cursor_blink_subscriptions: cursor_blink_subscriptions,
             default_cursor_style,
             suggest: {

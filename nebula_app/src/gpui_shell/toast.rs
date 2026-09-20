@@ -17,7 +17,6 @@
 //! 重复冷却在本层补齐（600ms，同文本）。
 
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use gpui::{AnyElement, App, IntoElement as _, ParentElement as _, Styled as _, Window, div, px};
@@ -52,10 +51,10 @@ const BANNER_TTL: Duration = Duration::from_secs(90);
 
 static LAST_TOAST: Mutex<Option<(String, Instant)>> = Mutex::new(None);
 static PANE_BANNERS: Mutex<PaneBannerGate> = Mutex::new(PaneBannerGate { recent: Vec::new() });
-static NEXT_AI_TOAST: AtomicU64 = AtomicU64::new(1);
 
 /// A component notification identity, not a separate queue or lifetime manager.
 struct AiToast;
+struct PaneToast;
 
 #[cfg(all(test, feature = "gpui-test-support"))]
 mod duration_tests;
@@ -93,6 +92,9 @@ impl PaneBannerGate {
         }) {
             return false;
         }
+        // Recovery ends the previous result, even when the same error returns
+        // before the duplicate cooldown has elapsed.
+        self.recent.retain(|(pane, _, _, _)| *pane != pane_id);
         self.recent.push((pane_id, kind, text.to_owned(), now));
         true
     }
@@ -224,8 +226,9 @@ pub(crate) fn banner_for_pane(
         cx.defer(move |cx| super::workspace::windowing::focus_notification(Some(pane_id), cx));
     });
     if ai_toast {
-        notification = notification
-            .id1::<AiToast>(("ai-banner", NEXT_AI_TOAST.fetch_add(1, Ordering::Relaxed)));
+        notification = notification.id1::<AiToast>(("ai-result", pane_id));
+    } else {
+        notification = notification.id1::<PaneToast>(("pane-result", pane_id));
     }
     push_banner(window, cx, notification, ai_toast);
 }
@@ -417,6 +420,8 @@ mod tests {
         assert!(gate.accepts(1, ToastKind::Warning, "done", now));
         assert!(gate.accepts(1, ToastKind::Warning, "permission", now));
         assert!(!gate.accepts(1, ToastKind::Warning, "permission", now));
+        assert!(gate.accepts(1, ToastKind::Info, "done", now));
+        assert!(!gate.accepts(1, ToastKind::Info, "done", now));
         assert!(gate.accepts(1, ToastKind::Info, "done", now + DUPLICATE_COOLDOWN));
         assert_eq!(gate.recent.len(), 1);
     }

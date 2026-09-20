@@ -7,7 +7,7 @@ pub(super) const REPOSITORY_URL: &str = "https://github.com/Kuddev/pebrel";
 pub(super) const BUG_REPORT_TEMPLATE: &str = "bug_report.yml";
 
 /// 左侧分区的稳定路由表。2026-08-28 产品裁定：默认 GPUI 导航收敛为常用项，
-/// 暂时隐藏“AI 供应商”和“备份”；页面实现与索引继续保留。后续恢复入口时只改
+/// 暂时隐藏“AI 供应商”；页面实现与索引继续保留。后续恢复入口时只改
 /// [`HIDDEN_NAV_SECTIONS`]，不得删除或重排这里的条目。
 pub(super) const SECTION_IDS: [&str; 10] = [
     "application",
@@ -35,10 +35,10 @@ pub(super) const SECTION_SEARCH_TERMS: [&str; 10] = [
     "interaction 交互 copy 复制 paste 粘贴 tab 标签 panel 面板 focus follows mouse 焦点跟随鼠标 自动聚焦",
     "keymap key binding shortcut quick terminal 快速终端 独立窗口 已有窗口 按键映射 快捷键",
     "advanced 高级 session 会话 tray 托盘 restore 恢复 startup autostart login silent 自启动 静默启动 开机 登录",
-    "backup 备份 export 导出 restore 恢复",
+    "backup cloud sync 云备份 云同步 云存储 备份 export 导出 restore 恢复 webdav s3 sftp 坚果云 123 123云盘 nextcloud synology 群晖 nas r2 minio snapshots 快照",
 ];
 
-pub(super) const HIDDEN_NAV_SECTIONS: &[usize] = &[3, 9];
+pub(super) const HIDDEN_NAV_SECTIONS: &[usize] = &[3];
 
 /// 保留原来的分组展开顺序，组名不再渲染；数组里仍保存稳定的 [`SECTION_IDS`]
 /// 下标，不复制设置状态或路由。
@@ -73,10 +73,9 @@ pub(super) fn visible_nav_sections() -> impl Iterator<Item = usize> {
 }
 
 // 导航使用组件的小字号，与搜索菜单一致；尺寸是逻辑像素，由窗口统一处理 DPI。
-pub(super) const SETTINGS_NAV_WIDTH: f32 = 208.0;
+pub(super) const SETTINGS_NAV_WIDTH: f32 = 256.0;
 pub(super) const SETTINGS_NAV_ROW_HEIGHT: f32 = 34.0;
 pub(super) const SETTINGS_NAV_ICON_SIZE: f32 = 16.0;
-pub(super) const SETTINGS_HEADER_HEIGHT: f32 = 74.0;
 
 // 正文分组与表单继续沿用现有几何节奏。
 pub(super) const SETTINGS_GROUP_GAP: f32 = 32.0;
@@ -116,6 +115,7 @@ pub(super) fn section_icon(index: usize) -> SharedString {
         6 => crate::gpui_shell::assets::nav::MOUSE_POINTER.into(),
         7 => crate::gpui_shell::assets::nav::KEYMAP.into(),
         8 => crate::gpui_shell::assets::nav::SLIDERS.into(),
+        9 => IconName::HardDrive.path(),
         _ => IconName::Inbox.path(),
     }
 }
