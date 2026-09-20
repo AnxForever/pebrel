@@ -83,13 +83,86 @@ fn paste_confirmation_follows_execution_risk_not_volume() {
 }
 
 #[test]
-fn terminal_font_explicitly_enables_maple_ligatures() {
-    let font = typography::mono_font(
-        crate::font_install::REQUIRED_FONT_FAMILY,
-        FontWeight::NORMAL,
-        FontStyle::Normal,
-    );
-    assert_eq!(font.features.tag_value_list(), &[("calt".to_owned(), 1)]);
+fn all_font_faces_explicitly_control_ligatures_without_enabling_kerning() {
+    for enabled in [true, false] {
+        for weight in [FontWeight::NORMAL, FontWeight::BOLD] {
+            for style in [FontStyle::Normal, FontStyle::Italic] {
+                let font = typography::mono_font(
+                    crate::font_install::REQUIRED_FONT_FAMILY,
+                    weight,
+                    style,
+                    enabled,
+                );
+                assert_eq!(
+                    font.features.tag_value_list(),
+                    &[
+                        ("calt".to_owned(), u32::from(enabled)),
+                        ("liga".to_owned(), u32::from(enabled)),
+                        ("clig".to_owned(), u32::from(enabled)),
+                        ("kern".to_owned(), 0),
+                    ]
+                );
+            }
+        }
+    }
+}
+
+// Linux's headless platform uses the real text shaper with no display or GPU.
+// GPUI's normal test context uses NoopTextSystem and cannot prove ligatures.
+#[cfg(target_os = "linux")]
+#[test]
+fn real_bundled_font_shapes_ligatures_and_preserves_the_cached_natural_layout() {
+    use crate::gpui_shell::terminal::ligatures::shape_ascii_span;
+    use gpui::{Hsla, TextRun, WindowTextSystem, px};
+
+    let app = gpui_platform::headless();
+    let text_system = WindowTextSystem::new(app.text_system());
+    text_system
+        .add_fonts(vec![std::borrow::Cow::Borrowed(crate::font_install::REQUIRED_FONT_BYTES)])
+        .unwrap();
+    let run = |enabled| TextRun {
+        len: 4,
+        font: typography::mono_font(
+            crate::font_install::REQUIRED_FONT_FAMILY,
+            FontWeight::NORMAL,
+            FontStyle::Normal,
+            enabled,
+        ),
+        color: Hsla::default(),
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    };
+    let glyph_ids = |line: &gpui::ShapedLine| {
+        line.runs.iter().flat_map(|run| &run.glyphs).map(|glyph| glyph.id).collect::<Vec<_>>()
+    };
+    for sample in ["a->b", "a!=b", "a==b"] {
+        let natural = text_system.shape_line(sample.into(), px(15.0), &[run(true)], None);
+        let disabled = text_system.shape_line(sample.into(), px(15.0), &[run(false)], None);
+        assert_ne!(glyph_ids(&natural), glyph_ids(&disabled), "real font must join {sample}");
+        let before: Vec<_> =
+            natural.runs.iter().flat_map(|run| &run.glyphs).map(|glyph| glyph.position).collect();
+        let aligned = shape_ascii_span(&text_system, sample.into(), px(15.0), run(true), px(8.0));
+        assert_eq!(glyph_ids(&aligned), glyph_ids(&natural), "keep contextual substitutions");
+        assert_eq!(aligned.width, px(32.0));
+        let last = aligned
+            .runs
+            .iter()
+            .flat_map(|run| &run.glyphs)
+            .find(|glyph| glyph.index == 3)
+            .expect("cell after the ligature");
+        assert_eq!(last.position.x, px(24.0));
+        let cached = text_system.shape_line(sample.into(), px(15.0), &[run(true)], None);
+        assert_eq!(
+            before,
+            cached
+                .runs
+                .iter()
+                .flat_map(|run| &run.glyphs)
+                .map(|glyph| glyph.position)
+                .collect::<Vec<_>>()
+        );
+    }
 }
 
 #[test]
