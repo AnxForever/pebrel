@@ -4,8 +4,10 @@ use nebula_terminal::event_loop::StreamProcessor;
 use startup_tests::open;
 
 fn prompt_bytes(prompt: &str, input: &str) -> Vec<u8> {
-    format!("\x1b]133;A\x07{prompt}\x1b]133;B\x07\x1b]1337;SetUserVar=pebrel_cmd_prompt=MQ==\x07{input}")
-        .into_bytes()
+    format!(
+        "\x1b]133;A\x07{prompt}\x1b]133;B\x07\x1b]1337;SetUserVar=pebrel_cmd_prompt=MQ==\x07{input}"
+    )
+    .into_bytes()
 }
 
 fn root_process() -> Vec<crate::process_tree::ProcessEntry> {
@@ -89,7 +91,9 @@ fn custom_native_prompts_handle_empty_submit_paste_and_runtime_without_fake_hist
                 match action {
                     "empty" => view.commit_line(cx),
                     "paste" => view.paste_now_impl("pause\r\n", false, cx),
-                    _ => { view.runtime_prompt("pause".into(), true, cx).unwrap(); },
+                    _ => {
+                        view.runtime_prompt("pause".into(), true, cx).unwrap();
+                    },
                 }
                 assert_eq!(view.command_running, action != "empty", "{prompt:?} {action}");
                 assert!(view.suggest.last_committed.is_empty(), "unconfirmed input is not history");

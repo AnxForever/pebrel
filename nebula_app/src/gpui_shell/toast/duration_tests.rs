@@ -45,11 +45,7 @@ fn settle_dismissal(cx: &mut VisualTestContext) {
 }
 
 fn pi_completion() -> crate::notify::Notification {
-    crate::notify::Notification::AiTurn {
-        program: "pi".into(),
-        message: None,
-        attention: false,
-    }
+    crate::notify::Notification::AiTurn { program: "pi".into(), message: None, attention: false }
 }
 
 #[gpui::test]
@@ -61,12 +57,19 @@ fn pi_completion_uses_five_seconds_only_when_the_user_keeps_the_default(cx: &mut
         NotificationDuration::ThirtySeconds,
         NotificationDuration::NinetySeconds,
         NotificationDuration::Persistent,
-    ].into_iter().enumerate() {
+    ]
+    .into_iter()
+    .enumerate()
+    {
         let mut window = open(duration, cx);
         window.update(|window, cx| {
             banner_for_pane(
-                window, cx, ToastKind::Info, format!("Pi complete {duration:?}"),
-                84000 + index as u64, &pi_completion(),
+                window,
+                cx,
+                ToastKind::Info,
+                format!("Pi complete {duration:?}"),
+                84000 + index as u64,
+                &pi_completion(),
             );
         });
         let original = ids(&mut window);
@@ -91,7 +94,9 @@ fn pane_result_replacement_preserves_other_panes_and_uses_the_selected_duration(
     let mut window = open(NotificationDuration::FiveSeconds, cx);
     let old = window.update(|window, cx| {
         let failure = crate::notify::Notification::AiTurnIssue {
-            program: "pi".into(), message: None, outcome: crate::ai_hook::AiTurnOutcome::Failed,
+            program: "pi".into(),
+            message: None,
+            outcome: crate::ai_hook::AiTurnOutcome::Failed,
         };
         banner_for_pane(window, cx, ToastKind::Warning, "Overloaded", 83001, &failure);
         let old = window.notifications(cx)[0].clone();

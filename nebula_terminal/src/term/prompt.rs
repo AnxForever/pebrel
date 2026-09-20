@@ -72,9 +72,8 @@ impl<T> Term<T> {
         if line < self.grid.scrolled_out() || column.0 >= self.columns() {
             return None;
         }
-        let relative = line as i64
-            - self.grid.scrolled_out() as i64
-            - self.grid.history_size() as i64;
+        let relative =
+            line as i64 - self.grid.scrolled_out() as i64 - self.grid.history_size() as i64;
         let point = Point::new(Line(i32::try_from(relative).ok()?), column);
         (point.line >= self.grid.topmost_line() && point.line <= self.grid.bottommost_line())
             .then_some(point)
@@ -114,5 +113,4 @@ impl<T> Term<T> {
         self.scroll_display(Scroll::Delta(delta));
         true
     }
-
 }

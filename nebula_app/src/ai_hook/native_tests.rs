@@ -24,14 +24,7 @@ fn non_successful_turns_do_not_emit_a_completion_notification() {
         Some(1),
     )
     .unwrap();
-    assert!(
-        crate::notify::Notification::from_ai_hook(
-            &event,
-            None,
-            false,
-        )
-        .is_some()
-    );
+    assert!(crate::notify::Notification::from_ai_hook(&event, None, false,).is_some());
 }
 #[test]
 fn pi_result_metadata_distinguishes_legacy_unknown_and_background_work() {
@@ -54,10 +47,7 @@ fn pi_result_metadata_distinguishes_legacy_unknown_and_background_work() {
         let mut activity = lifecycle::AgentActivity::default();
         assert!(activity.apply_hook(&event));
         assert_eq!(activity.status(), status);
-        assert_eq!(
-            Notification::from_ai_hook(&event, None, false).is_some(),
-            notifies
-        );
+        assert_eq!(Notification::from_ai_hook(&event, None, false).is_some(), notifies);
         event.background_tasks = Some(AiBackgroundTasks { active: 1, total: 1 });
         assert!(activity.apply_hook(&event));
         assert_eq!(activity.status(), AgentStatus::Working);

@@ -149,12 +149,9 @@ pub(crate) fn nebula_shell_ready_from_raw_grid<T: EventListener>(
     terminal: &Term<T>,
     env: &SuggestEnv,
 ) -> bool {
-    if let Some(line) = nebula_prompt_line_from_raw_grid(
-        terminal,
-        terminal.grid().cursor.point,
-        "",
-        env,
-    ) {
+    if let Some(line) =
+        nebula_prompt_line_from_raw_grid(terminal, terminal.grid().cursor.point, "", env)
+    {
         return line.input.trim().is_empty();
     }
     let Some(text) = raw_grid_logical_line(terminal, terminal.grid().cursor.point) else {

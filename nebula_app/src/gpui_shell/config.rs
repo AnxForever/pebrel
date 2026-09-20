@@ -858,7 +858,10 @@ mod tests {
             let mut overrides = Colors::default();
             assert_eq!(palette.resolve(Color::Indexed(16), &overrides, false), rgba8(configured));
             overrides[16] = Some(osc);
-            assert_eq!(palette.resolve(Color::Indexed(16), &overrides, false), rgba8([78, 90, 123]));
+            assert_eq!(
+                palette.resolve(Color::Indexed(16), &overrides, false),
+                rgba8([78, 90, 123])
+            );
             assert_eq!(palette.query_reply(16, &overrides), osc);
             overrides[16] = None;
             assert_eq!(palette.query_reply(16, &overrides), Rgb { r: 12, g: 34, b: 56 });
