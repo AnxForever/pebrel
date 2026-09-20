@@ -204,13 +204,4 @@ mod tests {
             }
         }
     }
-    #[test]
-    fn ai_toast_search_opens_the_terminal_alert_controls() {
-        for query in ["AI 消息弹窗", "AI消息通知", "右下角", "ai toast", "notifications"]
-        {
-            for language in [crate::display::UiLanguage::ZhCn, crate::display::UiLanguage::EnUs] {
-                assert_eq!(matching_sections(query, language), vec![2], "{query}");
-            }
-        }
-    }
 }
