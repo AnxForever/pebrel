@@ -98,8 +98,16 @@ pub(super) fn parse_envelope(bytes: &[u8]) -> Option<AiHookEvent> {
         "claude" => match payload.get("hook_event_name").and_then(Value::as_str) {
             Some("SessionStart") => (AiHookKind::SessionStart, None),
             Some("UserPromptSubmit") => (AiHookKind::PromptSubmit, None),
-            Some("PostToolUse") => (AiHookKind::ToolComplete, None),
+            Some("PreToolUse")
+                if payload.get("tool_name").and_then(Value::as_str) == Some("AskUserQuestion") =>
+            {
+                (AiHookKind::NeedsAttention, attention_message(&payload))
+            },
+            Some("PreToolUse" | "PostToolUse" | "PostToolUseFailure") => {
+                (AiHookKind::ToolComplete, None)
+            },
             Some("Stop") => (AiHookKind::TurnDone, None),
+            Some("StopFailure") => (AiHookKind::TurnDone, context_string(&payload, &["error"])),
             Some("SessionEnd") => (AiHookKind::SessionEnd, None),
             // `Notification` 覆盖「权限询问」和「idle 提醒」两类，将来也可能
             // 用来传别的东西。类型不可操作时丢掉，读不到类型时照常上报。
@@ -180,7 +188,9 @@ pub(super) fn parse_envelope(bytes: &[u8]) -> Option<AiHookEvent> {
     if source == "codex" && kind == AiHookKind::TurnDone && event_id.is_none() {
         event_id = turn_id.as_ref().map(|id| format!("codex:turn:{id}:done"));
     }
-    let turn_outcome = if source == "kimi" && kind == AiHookKind::TurnDone {
+    let turn_outcome = if matches!(source.as_str(), "claude" | "kimi")
+        && kind == AiHookKind::TurnDone
+    {
         match payload.get("hook_event_name").and_then(Value::as_str) {
             Some("Stop") => AiTurnOutcome::Succeeded,
             Some("Interrupt") => AiTurnOutcome::Cancelled,

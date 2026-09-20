@@ -18,6 +18,8 @@ mod ordering;
 mod payload;
 mod protocol;
 pub(crate) mod remote;
+#[cfg(windows)]
+pub(crate) mod wsl;
 
 pub(crate) use event::CodexHookMode;
 pub use event::{
@@ -63,13 +65,16 @@ const HELPER_ARGS: [&str; 1] = ["claude"];
 /// Claude hook events we subscribe to. Session boundaries carry the id needed
 /// for resume/fork; PostToolUse lets a stale permission state return to working
 /// before the whole turn completes.
-const CLAUDE_EVENTS: [&str; 7] = [
+const CLAUDE_EVENTS: [&str; 10] = [
     "SessionStart",
     "UserPromptSubmit",
     "Notification",
     "PermissionRequest",
+    "PreToolUse",
     "PostToolUse",
+    "PostToolUseFailure",
     "Stop",
+    "StopFailure",
     "SessionEnd",
 ];
 
