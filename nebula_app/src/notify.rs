@@ -156,7 +156,7 @@ impl Notification {
                         outcome: event.turn_outcome,
                     });
                 },
-                AiTurnOutcome::Unknown if event.source == "pi" => {
+                AiTurnOutcome::Unknown | AiTurnOutcome::Unspecified if event.source == "pi" => {
                     return Some(Self::AiTurnIssue {
                         program: event.source.clone(),
                         message: None,
@@ -557,6 +557,39 @@ mod delivery_tests {
             let note = Notification::from_ai_hook(&event, None, false).unwrap();
             assert!(gate.accepts(1, &note, true, now));
             assert!(!gate.accepts(1, &note, true, now));
+        }
+    }
+
+    #[test]
+    fn pi_outcomes_do_not_turn_failure_or_cancellation_into_success() {
+        use crate::ai_hook::AiTurnOutcome;
+        for (reason, expected) in [
+            ("error", Some(AiTurnOutcome::Failed)),
+            ("aborted", None),
+            ("unknown", Some(AiTurnOutcome::Unknown)),
+            ("future", Some(AiTurnOutcome::Unknown)),
+            ("length", Some(AiTurnOutcome::Incomplete)),
+            ("toolUse", Some(AiTurnOutcome::Incomplete)),
+        ] {
+            let event = pi_result(Some(reason), None);
+            let notification = Notification::from_ai_hook(&event, None, false);
+            match (notification, expected) {
+                (None, None) => {},
+                (Some(Notification::AiTurnIssue { outcome, .. }), Some(expected)) => {
+                    assert_eq!(outcome, expected);
+                },
+                result => panic!("unexpected {reason} result: {result:?}"),
+            }
+        }
+        for reason in [None, Some("stop")] {
+            let mut payload = serde_json::json!({"kind": "done"});
+            if let Some(reason) = reason {
+                payload["stop_reason"] = reason.into();
+            }
+            let wire = format!("nebula-hook/1 source=pi\n{payload}");
+            let event = crate::ai_hook::parse_remote_envelope(wire.as_bytes(), Some(1)).unwrap();
+            let note = Notification::from_ai_hook(&event, None, false).unwrap();
+            assert_eq!(matches!(note, Notification::AiTurn { .. }), reason == Some("stop"));
         }
     }
 

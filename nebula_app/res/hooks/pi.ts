@@ -4,6 +4,24 @@ import { openSync, readSync, closeSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
+async function supportsSettled(): Promise<boolean> {
+  // Pi's loader supplies either package alias (or a bundled virtual module).
+  // A static runtime import of the renamed package prevents old Pi from loading
+  // this extension at all, before any agent_end fallback can be registered.
+  for (const name of ["@earendil-works/pi-coding-agent", "@mariozechner/pi-coding-agent"]) {
+    try {
+      const sdk = await import(name);
+      const version = sdk.VERSION ?? sdk.default?.VERSION;
+      const match = typeof version === "string" && /^(\d+)\.(\d+)\.(\d+)(?:$|[-+])/.exec(version);
+      if (match) {
+        const [, major, minor, patch] = match.map(Number);
+        return major > 0 || minor > 80 || (minor === 80 && patch >= 4);
+      }
+    } catch (_) {}
+  }
+  return false;
+}
+
 // Only provider IDs and the first JSONL metadata line are recovery identities.
 // A timestamped basename or a process ID cannot be handed to pi --session.
 function sessionFor(ctx: any): { session_id?: string; session_file?: string } {
@@ -30,12 +48,15 @@ function sessionFor(ctx: any): { session_id?: string; session_file?: string } {
   return typeof direct === "string" && direct ? { session_id: direct } : {};
 }
 
-export default function (pi: ExtensionAPI) {
+export default async function (pi: ExtensionAPI) {
   let active = false;
+  let stopReason = "unknown";
+  // agent_end ends one attempt; agent_settled (Pi 0.80.4+) includes retries.
+  let hasSettled = await supportsSettled();
   let sequence = 0;
   const sequenceEpoch = BigInt(Date.now()) * 1000000n;
   const bridge_instance = randomUUID();
-  const send = (kind: "session-start" | "prompt" | "tool-complete" | "done" | "session-end", ctx?: any, result: { stop_reason?: string; message?: string } = {}) => {
+  const send = (kind: "session-start" | "prompt" | "tool-complete" | "done" | "session-end", ctx?: any, result: { stop_reason?: string } = {}) => {
     const hook = process.env.PEBREL_HOOK_EXE ?? process.env.NEBULA_HOOK_EXE;
     if (!hook) return;
     try {
@@ -58,22 +79,35 @@ export default function (pi: ExtensionAPI) {
     } catch (_) {}
   };
 
+  const finish = (ctx: any) => {
+    if (!active) return;
+    active = false;
+    send("done", ctx, { stop_reason: stopReason });
+  };
   pi.on("agent_start", async (_event, ctx) => {
     active = true;
+    stopReason = "unknown";
     send("prompt", ctx);
   });
   pi.on("agent_end", async (event, ctx) => {
     if (!active) return;
-    active = false;
-    // agent_end also fires after API errors and cancellation. The last
-    // assistant result describes this turn, including recovery after a retry.
     const last = [...(event.messages ?? [])].reverse().find(message => message.role === "assistant");
-    send("done", ctx, last?.role === "assistant" ? {
-      stop_reason: last.stopReason,
-      message: last.stopReason === "error" ? last.errorMessage?.slice(0, 4000) : undefined,
-    } : {});
+    // Never forward provider errors: they may contain requests or credentials.
+    stopReason = last?.role === "assistant" ? last.stopReason ?? "unknown" : "unknown";
+    if (!hasSettled) finish(ctx);
   });
-  try { pi.on("session_start", async (_event, ctx) => send("session-start", ctx)); } catch (_) {}
+  if (hasSettled) {
+    try { pi.on("agent_settled", async (_event, ctx) => finish(ctx)); }
+    catch (_) { hasSettled = false; }
+  }
+  try { pi.on("session_start", async (_event, ctx) => {
+    active = false;
+    stopReason = "unknown";
+    send("session-start", ctx);
+  }); } catch (_) {}
   try { pi.on("tool_result", async (_event, ctx) => send("tool-complete", ctx)); } catch (_) {}
-  try { pi.on("session_shutdown", async (_event, ctx) => send("session-end", ctx)); } catch (_) {}
+  try { pi.on("session_shutdown", async (_event, ctx) => {
+    active = false;
+    send("session-end", ctx);
+  }); } catch (_) {}
 }

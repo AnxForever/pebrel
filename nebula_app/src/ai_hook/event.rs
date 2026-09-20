@@ -23,6 +23,8 @@ pub enum AiHookKind {
 /// provider result metadata may classify it; never scan assistant prose.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AiTurnOutcome {
+    /// Older Pi bridges omit result metadata; preserve their activity edge.
+    Unspecified,
     Succeeded,
     Failed,
     Cancelled,
