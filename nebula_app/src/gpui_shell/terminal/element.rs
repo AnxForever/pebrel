@@ -4,13 +4,10 @@
 //! （`nebula_terminal::render::RenderSnapshot`）把可见网格快照成纯数据后立刻
 //! 放锁；颜色解析（调色板 + OSC 覆盖表）与绘制都在锁外进行。
 //!
-//! 定位合同（与旧壳 `Renderer::draw_string` 相同）：每个 cell 的字形单独
-//! 塑形、从 `列号 × cell_width` 的整数 cell 原点起笔。绝不把整段文本交给
-//! `force_width` 批量塑形——GPUI 只在字形偏离目标格超过 1px 时才吸附
-//! （line_layout.rs），1px 内保留字体自然 advance；删除字符或分段变化引发
-//! 整行重塑形时，每个字形都可能在"自然位置/吸附位置"间翻转，肉眼即为
-//! 字符左右跳动。逐 cell 塑形时首字形天然落在 x=0，排版引擎没有移动
-//! 字形的权力；单字符行在 GPUI 行缓存中按 (字符, 字体) 去重，命中率极高。
+//! 定位合同：字形落在 `列号 × cell_width`，不使用 `force_width` 的
+//! 1px 吸附容差。关闭连字时逐格塑形；开启时，同样式的相邻 ASCII 格
+//! 共同塑形，再由 `ligatures` 把字形簇映射回固定列号。其余字符逐格
+//! 绘制，组合字符跟随基字；编辑、光标和选区不能改变无关格的原点。
 
 use std::collections::HashSet;
 
@@ -479,7 +476,7 @@ impl Element for TerminalElement {
             }
         }
 
-        let (font, bold_font, italic_font, bold_italic_font, font_size) = {
+        let (font, bold_font, italic_font, bold_italic_font, font_size, ligatures) = {
             let view = self.view.read(cx);
             (
                 view.font.clone(),
@@ -487,6 +484,7 @@ impl Element for TerminalElement {
                 view.font_italic.clone(),
                 view.font_bold_italic.clone(),
                 view.font_size,
+                view.ligatures,
             )
         };
         // 全宽（CJK 等）bold run 的字形策略（设置 `cjk_bold_regular`，默认
@@ -584,12 +582,13 @@ impl Element for TerminalElement {
             }
         }
 
-        // 旧壳定位合同：每个 cell 单独塑形，从自己的整数 cell 原点起笔。
-        // 不传 force_width——单 cell 首字形天然落在 x=0，位置完全由列号决定，
-        // 组合字符（零宽）跟随基字自然排布，不会被按字形序号吸附到邻格。
-        // 光标反色在这里只是换色，不影响任何字形位置。
+        // 连字仅合并同一行内同样式的窄 ASCII 格，光标、选区和公式
+        // 投影边界仍逐格裁定。字形簇的原点始终由固定网格决定。
         for seg in &snap.segments {
-            for cell in &seg.cells {
+            let mut cells = seg.cells.as_slice();
+            while let Some(cell) = cells.first() {
+                let remaining = cells;
+                cells = &cells[1..];
                 // 被公式覆盖的源格不画原文（公式直接落在卡底上，与旧壳
                 // CoverageMask 合同一致；计划失败的公式不进掩码、原文保留）。
                 if math_frame.covers(seg.row as usize, cell.col as usize) {
@@ -628,15 +627,53 @@ impl Element for TerminalElement {
                     bounds.origin.x + layout.cell_width * visual_col as f32,
                     bounds.origin.y + layout.line_height * seg.row as f32,
                 );
-                paint_cell_text(
-                    window,
-                    cx,
-                    SharedString::from(cell.text.clone()),
-                    run,
-                    font_size,
-                    origin,
-                    layout.line_height,
-                );
+                let count = if ligatures && !seg.wide && !dashed_link {
+                    super::ligatures::span_len(remaining, |next, offset| {
+                        !math_frame.covers(seg.row as usize, next.col as usize)
+                            && math_frame.project_cell(
+                                seg.row as usize,
+                                next.col as usize,
+                                layout.cols,
+                            ) == Some(visual_col + offset)
+                            && cursor_inverts(seg.row, next.col)
+                                == cursor_inverts(seg.row, cell.col)
+                            && selected_foreground(seg.row, next.col)
+                                == selected_foreground(seg.row, cell.col)
+                            && !dashed.contains(&(seg.row, next.col))
+                    })
+                } else {
+                    1
+                };
+                if count > 1 {
+                    let text: String =
+                        remaining[..count].iter().map(|cell| cell.text.as_str()).collect();
+                    let shaped = super::ligatures::shape_ascii_span(
+                        window.text_system(),
+                        text.into(),
+                        font_size,
+                        run,
+                        layout.cell_width,
+                    );
+                    let _ = shaped.paint(
+                        origin,
+                        layout.line_height,
+                        gpui::TextAlign::Left,
+                        None,
+                        window,
+                        cx,
+                    );
+                    cells = &remaining[count..];
+                } else {
+                    paint_cell_text(
+                        window,
+                        cx,
+                        SharedString::from(cell.text.clone()),
+                        run,
+                        font_size,
+                        origin,
+                        layout.line_height,
+                    );
+                }
                 if dashed_link {
                     paint_dashed_underline(
                         window,
@@ -991,10 +1028,10 @@ fn paint_link_preview(
     );
 }
 
-/// 唯一的 cell 文本落笔原语：单 cell 文本塑形后从调用方给定的整数 cell
+/// 单格文本落笔原语：单 cell 文本塑形后从调用方给定的整数 cell
 /// 原点起笔，不传 `force_width`（首字形天然在 x=0，位置只由列号决定）。
-/// 网格、ghost、弹窗全部经由此处——定位合同只此一份，禁止绕开它直接
-/// `shape_line` 网格对齐文本。
+/// 网格的单格回退、ghost 和弹窗经由此处；ASCII 连字由 `ligatures`
+/// 显式映射字形簇到列号。两条路径都不依赖自然 advance 定位后续格。
 fn paint_cell_text(
     window: &mut Window,
     cx: &mut App,

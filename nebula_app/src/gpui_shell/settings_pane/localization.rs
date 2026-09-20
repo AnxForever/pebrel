@@ -67,6 +67,11 @@ pub(super) fn localized_select_labels(
             language.pick("仅 Git", "Git only"),
             language.pick("仅 SVN", "SVN only"),
         ],
+        "ligatures" => vec![
+            language.text(crate::i18n::Message::SettingsFontLigaturesOn),
+            language.text(crate::i18n::Message::SettingsFontLigaturesOff),
+            language.text(crate::i18n::Message::SettingsFontLigaturesTheme),
+        ],
         "cell_width_mode" => {
             vec![language.pick("紧凑", "Compact"), language.pick("宽松", "Relaxed")]
         },

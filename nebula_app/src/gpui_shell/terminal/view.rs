@@ -272,6 +272,7 @@ pub struct TerminalView {
     pub font_italic: Font,
     pub font_bold_italic: Font,
     pub font_size: Pixels,
+    pub ligatures: bool,
     cell_width_mode: nebula_settings::CellWidthModeName,
     /// Cell offsets use physical pixels, matching the legacy crossfont
     /// contract. They are applied after GPUI has shaped the actual face.
@@ -865,11 +866,16 @@ impl TerminalView {
         // 样式/开关热切换即作废当前提示：缓存键留着会挡住新样式的首次重算。
         self.suggest.clear_completion_hints();
 
-        self.font = mono_font(&families[0], FontWeight::NORMAL, FontStyle::Normal);
-        self.font_bold = mono_font(&families[1], FontWeight::BOLD, FontStyle::Normal);
-        self.font_italic = mono_font(&families[2], FontWeight::NORMAL, FontStyle::Italic);
-        self.font_bold_italic = mono_font(&families[3], FontWeight::BOLD, FontStyle::Italic);
+        self.font =
+            mono_font(&families[0], FontWeight::NORMAL, FontStyle::Normal, settings.ligatures);
+        self.font_bold =
+            mono_font(&families[1], FontWeight::BOLD, FontStyle::Normal, settings.ligatures);
+        self.font_italic =
+            mono_font(&families[2], FontWeight::NORMAL, FontStyle::Italic, settings.ligatures);
+        self.font_bold_italic =
+            mono_font(&families[3], FontWeight::BOLD, FontStyle::Italic, settings.ligatures);
         self.font_size = font_size;
+        self.ligatures = settings.ligatures;
         self.cell_width_mode = settings.cell_width_mode;
         self.font_offset_x = settings.font_offset_x;
         self.font_offset_y = settings.font_offset_y;

@@ -49,6 +49,7 @@ pub struct Settings {
     pub font_bold_italic_family: String,
     /// GPUI 逻辑像素（配置里是 pt，1pt = 4/3 px @96dpi）。
     pub font_size_px: f32,
+    pub ligatures: bool,
     /// 配置文件的基准字号，不含设置页/Ctrl+滚轮持久化的终端缩放。
     /// 启动窗口按它定形，和旧壳的 `window_size` 契约一致。
     pub base_font_size_px: f32,
@@ -251,6 +252,9 @@ impl Settings {
             font_italic_family: secondary(&raw.font.italic),
             font_bold_italic_family: secondary(&raw.font.bold_italic),
             font_size_px,
+            ligatures: runtime
+                .ligatures
+                .enabled(resolved_theme.typography().map(|typography| typography.ligatures)),
             base_font_size_px,
             ui_font_size_px: runtime.ui_font_size_px.unwrap_or(base_font_size_px),
             ui_font_family: runtime.ui_font_family.clone(),

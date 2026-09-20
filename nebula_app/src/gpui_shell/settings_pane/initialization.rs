@@ -129,6 +129,13 @@ impl SettingsPane {
             cx,
         );
         add_select(
+            "ligatures",
+            nebula_settings::Ligatures::VALUES,
+            runtime.ligatures.settings_value(),
+            window,
+            cx,
+        );
+        add_select(
             "cell_width_mode",
             &["compact", "relaxed"],
             runtime.cell_width_mode.settings_value(),

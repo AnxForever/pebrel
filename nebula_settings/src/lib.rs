@@ -24,6 +24,8 @@ pub use custom_theme::{
     meets_wcag_aa, wcag_contrast_ratio,
 };
 mod language;
+mod ligatures;
+pub use ligatures::Ligatures;
 mod notifications;
 pub use notifications::NotificationDuration;
 mod quick_terminal;
@@ -963,6 +965,8 @@ pub struct RuntimeSettings {
     /// **逻辑像素**（旧壳写盘语义：设置页 spinner 与 Ctrl+滚轮缩放持久化时
     /// 已除以 scale factor）。`None` = 跟随 nebula.toml 的 `font.size`（pt）。
     pub font_size_px: Option<f32>,
+    /// Enabled by default; explicit theme mode follows the selected theme.
+    pub ligatures: Ligatures,
     pub cursor_shape: Option<CursorShapeName>,
     pub cursor_blink: Option<bool>,
     pub copy_on_select: bool,
@@ -1132,6 +1136,10 @@ impl RuntimeSettings {
             ui_font_family: raw.value("ui_font_family").map(str::to_owned),
             ui_font_size_px: raw.f32("ui_font_size").map(|size| size.clamp(10.0, 24.0)),
             font_size_px: raw.f32("font_size").map(|size| size.clamp(4.0, 96.0)),
+            ligatures: raw
+                .value("ligatures")
+                .and_then(Ligatures::from_settings)
+                .unwrap_or_default(),
             cursor_shape: raw.value("cursor_shape").and_then(CursorShapeName::from_settings),
             cursor_blink: raw.bool_on("cursor_blink"),
             copy_on_select: raw.bool_on("copy_on_select").unwrap_or(false),
