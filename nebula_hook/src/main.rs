@@ -26,6 +26,7 @@
 //! nebula-hook claude                              # payload on stdin
 //! nebula-hook kimi                                # payload on stdin
 //! nebula-hook codex <json>                        # payload as last arg
+//! nebula-hook codex --hooks=full                  # native hooks, stdin
 //! nebula-hook codex --chain <exe> <fixed…> <json> # + exec previous notifier
 //! nebula-hook opencode <json>                     # payload as last arg
 //! nebula-hook pi <json>                           # payload as last arg
@@ -194,8 +195,8 @@ fn payload_on_stdin(source: &str) -> bool {
 
 /// 侧信道信封：一行 `nebula-hook/1 source=<s> pane=<p>` 头加原始载荷。helper 不重
 /// 编码，Nebula 侧按 source 路由到对应 provider 的解析分支。
-fn envelope(source: &str, pane: &str, payload: &[u8]) -> Vec<u8> {
-    let mut message = format!("nebula-hook/1 source={source} pane={pane}\n").into_bytes();
+fn envelope(source: &str, pane: &str, contract: &str, payload: &[u8]) -> Vec<u8> {
+    let mut message = format!("nebula-hook/1 source={source} pane={pane}{contract}\n").into_bytes();
     message.extend_from_slice(payload);
     message
 }
@@ -206,9 +207,10 @@ fn run() {
         return;
     };
 
-    // Payload: claude and kimi stream JSON on stdin; codex, opencode and pi
-    // append it as the last arg.
-    let payload = if payload_on_stdin(source) {
+    // Native hooks stream stdin; legacy notify bridges append JSON as argv.
+    let native_codex = source == "codex"
+        && args.get(1).is_some_and(|arg| matches!(arg.as_str(), "--hooks=turns" | "--hooks=full"));
+    let payload = if payload_on_stdin(source) || native_codex {
         match read_payload(std::io::stdin().lock()) {
             Ok(Some(bytes)) => bytes,
             Ok(None) => {
@@ -231,7 +233,12 @@ fn run() {
     }
 
     let pane = hook_env("PANE_ID").and_then(|value| value.into_string().ok()).unwrap_or_default();
-    let message = envelope(source, &pane, &payload);
+    let contract = if native_codex {
+        format!(" codex_hooks={}", args[1].strip_prefix("--hooks=").unwrap())
+    } else {
+        String::new()
+    };
+    let message = envelope(source, &pane, &contract, &payload);
 
     // 本地 Pane 使用命名管道；远端 Pane 没有本地管道时，把同一信封写入控制终端的私有 OSC。
     let mut outcome = Outcome::NotHosted;
@@ -358,7 +365,7 @@ mod tests {
         let payload = super::read_payload(stdin_json).unwrap().unwrap();
         assert_eq!(payload, stdin_json);
 
-        let message = super::envelope("kimi", "11", &payload);
+        let message = super::envelope("kimi", "11", "", &payload);
         let header: &[u8] = b"nebula-hook/1 source=kimi pane=11\n";
         assert!(message.starts_with(header));
         assert_eq!(&message[header.len()..], stdin_json);

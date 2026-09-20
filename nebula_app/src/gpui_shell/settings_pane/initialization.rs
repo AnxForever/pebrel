@@ -32,6 +32,10 @@ impl SettingsPane {
                     if let SelectEvent::Confirm(Some(_)) = event {
                         let row = entity.read(cx).selected_index(cx).map(|path| path.row);
                         if let Some(value) = row.and_then(|row| values.get(row)) {
+                            if key == "notification_duration" {
+                                this.set_notification_duration(value, window, cx);
+                                return;
+                            }
                             if key == "scrollback_lines" {
                                 this.commit_scrollback_lines(value, window, cx);
                             } else {
@@ -67,6 +71,13 @@ impl SettingsPane {
             cx,
         );
         add_select("theme", &THEME_VALUES, runtime.theme.prompt_name(), window, cx);
+        add_select(
+            "notification_duration",
+            nebula_settings::NotificationDuration::VALUES,
+            runtime.notification_duration.settings_value(),
+            window,
+            cx,
+        );
         // 选项顺序与文案照抄旧壳 `CURSOR_SHAPE_OPTIONS` / `cursor_shape_label`。
         add_select(
             "cursor_shape",
@@ -114,6 +125,13 @@ impl SettingsPane {
             "vcs_display",
             &["auto", "git", "svn"],
             runtime.vcs_display.settings_value(),
+            window,
+            cx,
+        );
+        add_select(
+            "ligatures",
+            nebula_settings::Ligatures::VALUES,
+            runtime.ligatures.settings_value(),
             window,
             cx,
         );
@@ -379,6 +397,7 @@ impl SettingsPane {
         // 构造体内按当前协议回填。
         let backup_remote_inputs: Vec<Entity<InputState>> =
             (0..4).map(|_| cx.new(|cx| InputState::new(window, cx))).collect();
+        let backup_remote = crate::backup_remote::BackupRemoteConfig::load();
 
         let ssh_library =
             crate::gpui_shell::ssh_settings::library::HostLibraryState::new(window, cx);
@@ -628,7 +647,8 @@ impl SettingsPane {
             font_family_input,
             font_family_cjk_input,
             font_picker_trigger_bounds: None,
-            backup_selection: crate::encrypted_backup::BackupSelection::default(),
+            backup_selection: backup_remote.selection,
+            backup_ui: backup::BackupUiState::default(),
             backup_pass_input: cx.new(|cx| {
                 InputState::new(window, cx)
                     .masked(true)
@@ -638,7 +658,7 @@ impl SettingsPane {
             backup_busy: false,
             backup_seq: 0,
             backup_remote: {
-                let cfg = crate::backup_remote::BackupRemoteConfig::load();
+                let cfg = backup_remote;
                 for (ix, input) in backup_remote_inputs.iter().enumerate() {
                     let value = cfg.slot(ix).unwrap_or_default().to_owned();
                     input.update(cx, |input, cx| input.set_value(value, window, cx));

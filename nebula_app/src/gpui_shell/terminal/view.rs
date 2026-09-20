@@ -1,12 +1,19 @@
 //! 终端视图：持有会话、处理输入与 IME、驱动重绘。
 
+#[cfg(all(test, feature = "gpui-test-support"))]
+mod activity_tests;
+mod agent_activity;
 mod broadcast;
 mod completion;
 mod confirmation;
 mod cwd_report;
 mod image_paste;
 mod layout;
+#[cfg(all(test, windows, feature = "gpui-test-support"))]
+mod native_cmd_tests;
 mod notifications;
+#[cfg(all(test, feature = "gpui-test-support"))]
+mod output_tests;
 mod path_drop;
 mod pointer;
 mod runtime;
@@ -267,6 +274,7 @@ pub struct TerminalView {
     pub font_italic: Font,
     pub font_bold_italic: Font,
     pub font_size: Pixels,
+    pub ligatures: bool,
     cell_width_mode: nebula_settings::CellWidthModeName,
     /// Cell offsets use physical pixels, matching the legacy crossfont
     /// contract. They are applied after GPUI has shaped the actual face.
@@ -305,37 +313,18 @@ pub struct TerminalView {
     command_started: Option<std::time::Instant>,
     /// 上次跑进程树探测的时刻，用于节流。
     last_process_probe: Option<std::time::Instant>,
+    prompt_process_probe: Option<gpui::Task<()>>,
+    prompt_input_epoch: u64,
+    native_prompt_seen: bool,
+    native_prompt_epoch: Option<u64>,
+    last_prompt_process_probe: Option<std::time::Instant>,
     active_run: Option<crate::runtime_api::RuntimePaneRun>,
     last_run: Option<crate::runtime_api::RuntimeRunOutcome>,
-    /// Hook 事件驱动的 agent 回合状态（旧壳 `nebula_state.agent_status` 的
-    /// 边沿触发版）。`Unknown` = 本 pane 没有 agent 参与，spinner 完全由
-    /// `command_running`/`running_program` 决定。
-    agent_status: crate::ai_agents::AgentStatus,
-    /// 状态证据来源与命中的屏幕规则。Runtime API 直接投影这两项，外部
-    /// Agent 可以区分 hook 权威边沿、屏幕补偿和仅进程识别。
-    agent_status_source: crate::ai_agents::AgentStatusSource,
-    agent_status_rule: Option<String>,
-    /// 本次前台 agent 会话是否收到过 hook（旧壳同名字段同语义）：屏幕
-    /// 检测的空闲提示符不得降级 hook 报出的 Done/Blocked 精确终态。
-    agent_hook_seen: bool,
-    /// 这个 pane 的主 agent 进程 pid（第一个报到的那个）。只有它能写 pane 的
-    /// 会话身份；嵌套 `claude -p` 子代理有自己的 pid，它那个短命 session id
-    /// 不能顶掉真正活着的会话。回到提示符（133;D）或 SessionEnd 时清空。
-    primary_agent_pid: Option<u32>,
+    /// Shared lifecycle owns hook authority, session scope and fallback evidence.
+    agent_activity: crate::ai_hook::lifecycle::AgentActivity,
     /// 程序上报的任务进度（OSC 9;4）。存在 pane 上、由宿主投到任务栏：一个
     /// 窗口只有一个任务栏按钮，谁被看着只有宿主知道。
     pub progress: crate::taskbar::TaskProgress,
-    /// 本 pane 的 agent 在当前回合有过活动（hook 派活、屏幕判 working、或
-    /// Runtime 提交）。屏幕回到空闲提示符时据此区分「干完了、你还没看」
-    /// （Done，蓝点）与「从没开工」（Idle，只显示 shell 标签）——消费点在
-    /// `runtime::refresh_agent_screen_state`。
-    agent_turn_active: bool,
-    /// 屏幕检测连续看到空闲提示符的拍数；Working 连续两拍空闲才降级
-    /// （单拍可能是重绘间隙），非 idle 检测与任何 hook 边沿都清零。
-    idle_screen_streak: u8,
-    /// Runtime 派活后，旧输入框仍可能连续命中 `prompt_idle`。在看到本回合
-    /// 的 working/blocked 屏幕或权威 hook 前，不允许它伪造完成边沿。
-    agent_runtime_submit_pending: bool,
     pending_runtime_submit: Option<crate::display::state::RuntimeSubmitBarrier>,
     pending_shell_command: Option<startup_command::PendingShellCommand>,
     recovery: startup_command::SessionRecovery,
@@ -429,6 +418,8 @@ pub struct TerminalView {
     /// timer 回调没有 `Window`，状态变化由 GPUI observer 立即重启相位。
     cursor_window_active: bool,
     cursor_pane_focused: bool,
+    /// Workspace presentation is independent of keyboard/window focus.
+    output_visible: bool,
     _cursor_blink_subscriptions: [gpui::Subscription; 3],
     /// 最近一次由设置页下发的默认样式。只在它真正变化时清理 shell 的
     /// DECSCUSR/DEC mode 12 覆盖，避免无关设置变更打断 vim 等程序光标。
@@ -504,6 +495,27 @@ impl TerminalView {
         typography::startup_cell_metrics(window, cx)
     }
 
+    pub(in crate::gpui_shell) fn set_output_visible(
+        &mut self,
+        visible: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if std::mem::replace(&mut self.output_visible, visible) != visible && visible {
+            // Hidden output deliberately did not invalidate the cached view.
+            // The workspace declares visibility during render, where GPUI can
+            // absorb notifications. Invalidate after that draw so a cached child
+            // cannot keep showing the old grid when output has already stopped.
+            let view = cx.weak_entity();
+            cx.defer(move |cx| {
+                let _ = view.update(cx, |view, cx| {
+                    if view.output_visible {
+                        cx.notify();
+                    }
+                });
+            });
+        }
+    }
+
     pub(super) fn process_event(&mut self, event: TermEvent, cx: &mut Context<Self>) {
         let cwd_changed = cwd_report::apply(&mut self.cwd, &event);
         // Both shell metadata channels update completion and directory history.
@@ -521,7 +533,9 @@ impl TerminalView {
             TermEvent::Wakeup => {
                 self.flush_pending_runtime_submit(cx);
                 self.flush_pending_shell_command(cx);
-                cx.notify();
+                if self.output_visible {
+                    cx.notify();
+                }
             },
             TermEvent::MouseCursorDirty => {
                 cx.notify();
@@ -535,8 +549,12 @@ impl TerminalView {
                     let mut parts = rest.splitn(3, '|');
                     parts.next();
                     self.branch = parts.next().unwrap_or("").trim().to_owned();
-                    self.running_program =
-                        parts.next().map(|p| p.trim().to_owned()).filter(|p| !p.is_empty());
+                    if let Some(program) = parts.next()
+                        && !self.agent_activity.hook_seen()
+                    {
+                        self.running_program =
+                            (!program.trim().is_empty()).then(|| program.trim().to_owned());
+                    }
                     // 协议串不是窗口标题，更不是 tab 名。
                 } else {
                     self.title = title;
@@ -624,18 +642,7 @@ impl TerminalView {
                 {
                     return;
                 }
-                self.notify_command_done(cx);
-                self.last_command_failed = exit_code.is_some_and(|code| code != 0);
-                // 旧壳同款收尾：CLI 退回提示符后，它不再是这个 pane 的前台
-                // 事实——hook 稍后若仍在跑会重新点亮（handle_ai_hook 覆写）。
-                if self.clear_foreground_agent_state() {
-                    cx.emit(TerminalViewEvent::TitleChanged);
-                }
-                if let Some(run) = self.active_run.take() {
-                    self.last_run =
-                        Some(crate::runtime_api::RuntimeRunOutcome::command_done(run, exit_code));
-                }
-                cx.notify();
+                self.finish_foreground_command(exit_code, cx);
             },
             TermEvent::Notify(body) => {
                 let body = body.trim().to_owned();
@@ -661,6 +668,12 @@ impl TerminalView {
             },
             TermEvent::Bell => self.on_bell(cx),
             TermEvent::UserVar { name, value } => {
+                if name == "pebrel_cmd_prompt"
+                    && value == "1"
+                    && self.suggest.suggest_env.is_this_machine()
+                {
+                    self.on_native_cmd_prompt(cx);
+                }
                 self.suggest.completion_shell_report(&name, &value);
                 cx.notify();
             },
@@ -712,6 +725,7 @@ impl TerminalView {
 
     /// 输入后回到底部并请求重绘。
     fn write_input(&mut self, bytes: Vec<u8>, cx: &mut Context<Self>) {
+        self.prompt_input_epoch = self.prompt_input_epoch.wrapping_add(1);
         self.path_drop.invalidate();
         self.image_paste.observe_input(&bytes);
         self.confirmation.observe_input(&bytes);
@@ -719,11 +733,18 @@ impl TerminalView {
         if let Some(session) = &self.session {
             {
                 let mut term = session.term.lock();
+                // Match the parser's Term-lock order before attributing queued prompts.
+                let preserves_prompt = super::event_mailbox::preserves_native_prompt(&bytes);
+                session.native_prompt.observe_input(self.prompt_input_epoch, preserves_prompt);
+                if !preserves_prompt {
+                    term.nebula_end_prompt();
+                }
                 term.scroll_display(Scroll::Bottom);
                 term.selection = None;
             }
             session.notifier.notify(bytes);
         }
+        self.sync_native_prompt();
         self.restart_cursor_blink(cx);
         cx.notify();
     }
@@ -778,15 +799,11 @@ impl TerminalView {
     }
 
     fn on_bell(&mut self, cx: &mut Context<Self>) {
-        // 「有人在等你」的兜底与响铃的**提示方式**无关：`BellMode::None` 关掉的
-        // 是声音和闪屏，不该把徽章一起关掉，所以这一段排在那道闸之前。
-        //
-        // 兜底只在没有权威判定时成立（见 `AgentStatus::is_decided`）：CC /
-        // codex 回合结束也会响铃，让响铃压过 hook / 屏幕规则报出的 `Done`，
-        // 屏幕上就会把「完成」显示成「在问你」。
-        if self.running_program.is_some() && !self.agent_status.is_decided() {
-            self.awaiting_input = true;
-            cx.notify();
+        // Typed hooks own this agent's result and attention notifications.
+        // BEL carries neither success nor error metadata and must not add a
+        // second completion card or sound to each failed retry.
+        if self.agent_activity.hook_seen() {
+            return;
         }
         let mode = nebula_settings::RuntimeSettings::load().bell;
         if mode == nebula_settings::BellModeName::None {
@@ -870,11 +887,16 @@ impl TerminalView {
         // 样式/开关热切换即作废当前提示：缓存键留着会挡住新样式的首次重算。
         self.suggest.clear_completion_hints();
 
-        self.font = mono_font(&families[0], FontWeight::NORMAL, FontStyle::Normal);
-        self.font_bold = mono_font(&families[1], FontWeight::BOLD, FontStyle::Normal);
-        self.font_italic = mono_font(&families[2], FontWeight::NORMAL, FontStyle::Italic);
-        self.font_bold_italic = mono_font(&families[3], FontWeight::BOLD, FontStyle::Italic);
+        self.font =
+            mono_font(&families[0], FontWeight::NORMAL, FontStyle::Normal, settings.ligatures);
+        self.font_bold =
+            mono_font(&families[1], FontWeight::BOLD, FontStyle::Normal, settings.ligatures);
+        self.font_italic =
+            mono_font(&families[2], FontWeight::NORMAL, FontStyle::Italic, settings.ligatures);
+        self.font_bold_italic =
+            mono_font(&families[3], FontWeight::BOLD, FontStyle::Italic, settings.ligatures);
         self.font_size = font_size;
+        self.ligatures = settings.ligatures;
         self.cell_width_mode = settings.cell_width_mode;
         self.font_offset_x = settings.font_offset_x;
         self.font_offset_y = settings.font_offset_y;
@@ -983,6 +1005,7 @@ impl TerminalView {
 
     fn paste_now_impl(&mut self, text: &str, emit: bool, cx: &mut Context<Self>) {
         let normalized = text.replace("\r\n", "\r").replace('\n', "\r");
+        self.capture_native_paste_submission(&normalized, cx);
         // 行镜像吃粘贴的字面文本；多行/控制字符由引擎侧作废（与旧壳
         // `nebula_input_text` 的防注入契约一致）。
         if !self.term_mode().contains(TermMode::ALT_SCREEN) {
@@ -1180,7 +1203,8 @@ impl TerminalView {
         // Tab、Esc、Home、Ctrl+C……）一律作废本行镜像与提示，宁缺毋滥。
         self.track_encoded_key(ks, &mode, cx);
 
-        if let Some(bytes) = keymap::encode(ks, &mode) {
+        if let Some(bytes) = keymap::encode_for_program(ks, &mode, self.running_program.as_deref())
+        {
             keymap::trace_enter(ks, &mode, &bytes);
             self.write_user_key(ks.clone(), bytes, cx);
             cx.stop_propagation();
@@ -1488,7 +1512,7 @@ impl TerminalView {
     fn open_answer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(snapshot) = self.answers.latest.clone() else { return };
         let reader = cx.new(|cx| super::answer_reader::AnswerReader::new(snapshot, cx));
-        if self.agent_status == crate::ai_agents::AgentStatus::Blocked {
+        if self.agent_activity.status() == crate::ai_agents::AgentStatus::Blocked {
             reader.update(cx, |reader, cx| reader.needs_attention(cx));
         }
         cx.subscribe_in(

@@ -124,8 +124,6 @@ impl NebulaWorkspace {
 
     pub(super) fn render_top_title_bar(
         &self,
-        files_active: bool,
-        git_active: bool,
         settings_active: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -680,7 +678,7 @@ impl NebulaWorkspace {
                     ),
             )
             // 新建 split button 紧跟 TabView；剩余空间才是可拖拽标题栏，
-            // 文件树与 Git 固定在其右侧。
+            // 共享详情侧栏入口固定在其右侧。
             .child(div().h_full().flex_1().min_w_0())
             .child(
                 title_bar_panel_controls()
@@ -698,26 +696,7 @@ impl NebulaWorkspace {
                                 this.toggle_command_manager(window, cx);
                             })),
                     )
-                    .child(
-                        Button::new("top-toggle-file-tree")
-                            .icon(if files_active {
-                                IconName::FolderOpen
-                            } else {
-                                IconName::FolderClosed
-                            })
-                            .ghost()
-                            .selected(files_active)
-                            .tooltip("目录树 (Ctrl+Shift+F)")
-                            .on_click(cx.listener(|this, _, _, cx| this.toggle_file_tree(cx))),
-                    )
-                    .child(
-                        Button::new("top-toggle-git-tree")
-                            .icon(IconName::Github)
-                            .ghost()
-                            .selected(git_active)
-                            .tooltip(crate::gpui_shell::config::ui_language(cx).text(crate::i18n::Message::VcsToggleGit))
-                            .on_click(cx.listener(|this, _, _, cx| this.toggle_git_tree(cx))),
-                    ),
+                    .child(self.render_right_sidebar_button(settings_active, cx)),
             )
             .into_any_element()
     }

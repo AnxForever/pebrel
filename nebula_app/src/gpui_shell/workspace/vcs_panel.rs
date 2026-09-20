@@ -15,48 +15,6 @@ pub(super) use commit_input::CommitInput;
 use relative_time::git_relative_time_at;
 
 impl NebulaWorkspace {
-    pub(super) fn render_side_panel_switch(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        use crate::display::side_panel::PanelView;
-
-        let language = crate::gpui_shell::config::ui_language(cx);
-        let files = self.side_panel.view == PanelView::Files;
-        let git = self.side_panel.view == PanelView::Git;
-        let git_count = self
-            .side_panel
-            .git()
-            .map(|snapshot| snapshot.unstaged.len() + snapshot.staged.len())
-            .unwrap_or(0);
-        let vcs_name = match self.side_panel.vcs() {
-            Some(crate::display::side_panel::VcsKind::Svn)
-            | Some(crate::display::side_panel::VcsKind::SvnRepository) => "SVN",
-            _ => "Git",
-        };
-        let is_git_vcs = vcs_name == "Git";
-        h_flex()
-            .gap_1()
-            .child(
-                Button::new("side-panel-files")
-                    .icon(IconName::FolderClosed)
-                    .label(language.text(Message::CommonFiles))
-                    .small()
-                    .selected(files)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.select_side_panel_view(PanelView::Files, cx);
-                    })),
-            )
-            .child(
-                Button::new("side-panel-git")
-                    .label(vcs_name)
-                    .when(is_git_vcs, |button| button.icon(IconName::Github))
-                    .small()
-                    .selected(git)
-                    .when(git_count > 0, |button| button.label(format!("{vcs_name} {git_count}")))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.select_side_panel_view(PanelView::Git, cx);
-                    })),
-            )
-    }
-
     pub(super) fn render_git_tree(
         &mut self,
         window: &mut Window,
@@ -64,7 +22,6 @@ impl NebulaWorkspace {
     ) -> gpui::AnyElement {
         let language = crate::gpui_shell::config::ui_language(cx);
         self.git_commit_input.sync_language(window, cx);
-        let view_switch = self.render_side_panel_switch(cx).into_any_element();
         let theme = cx.theme();
         let muted = theme.muted_foreground;
         let hover = theme.list_hover;
@@ -912,13 +869,13 @@ impl NebulaWorkspace {
 
         v_flex()
             .h_full()
-            .w(px(320.0))
+            .w_full()
+            .min_w_0()
             .flex_shrink_0()
             .p_2()
             .gap_2()
             // 与文件树共用父容器的壳色，不在内容层叠加背景或圆角。
             .occlude()
-            .child(view_switch)
             // VCS 状态现在跟着侧栏定位走（`SidePanel::vcs_root`），所以必须在
             // **这个视图里**给出回头路：在树里点 `..` 翻出仓库、或"打开目录"
             // 选到别处之后，用户得能一键回到终端当前目录。此前这个入口只画在
@@ -978,16 +935,6 @@ impl NebulaWorkspace {
                                 this.side_panel.request_refresh();
                                 this.sync_side_panel_to_active(false, cx);
                                 cx.notify();
-                            })),
-                    )
-                    .child(
-                        Button::new("git-tree-close")
-                            .icon(IconName::Close)
-                            .ghost()
-                            .xsmall()
-                            .tooltip(language.format(Message::VcsCloseStatus, &[("vcs", vcs_label)]))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.toggle_git_tree(cx);
                             })),
                     ),
             )

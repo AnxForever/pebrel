@@ -64,7 +64,6 @@ mod document_io;
 mod encrypted_backup;
 #[cfg(feature = "legacy-shell")]
 mod event;
-#[cfg(windows)]
 mod file_uri;
 mod font_install;
 mod git_worktree;
@@ -196,31 +195,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     #[cfg(windows)]
     panic::attach_handler();
 
-    // Portable builds are not necessarily on PATH. Export the exact executable
-    // before any PTY is created so Codex/Claude can call the supported control
-    // plane directly instead of scanning processes, port files, or source code.
-    //
-    // This is the fallback layer: every terminal pane gets the full identity
-    // contract (`TERM_PROGRAM`, pane id, bin dir, `PATH`) from `agent_env`.
-    // Setting it on the process too covers children spawned outside a PTY,
-    // which never see `tty::Options::env`.
-    #[cfg(windows)]
     if options.subcommands.is_none()
-        && let Ok(executable) = env::current_exe()
+        && let Err(error) = platform::startup::prepare_gui_process()
     {
-        // SAFETY: startup is still single-threaded here; all child PTYs are
-        // created later and inherit this stable value.
-        unsafe { env::set_var(agent_env::CLI_ENV, executable) };
-    }
-
-    #[cfg(windows)]
-    if options.subcommands.is_none() && env::var_os("NEBULA_DETACHED_LAUNCH").is_some() {
-        // 必须在进任何消息循环之前脱离启动控制台。GPUI 以前在这条
-        // FreeConsole 之前就 `return`，启动器（agent 作业对象）一退出
-        // 窗口就被带走。旧壳注释同一合同。
-        unsafe {
-            FreeConsole();
-        }
+        platform::startup::report_error(&error, true);
+        return Err(error.into());
     }
 
     // 产品主窗：GPUI 作为 nebula.exe 的 UI 层，从主线程直接进 GPUI
@@ -276,6 +255,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         Some(Subcommands::NotifyTest) => std::process::exit(crate::notify::notify_test()),
         #[cfg(windows)]
         Some(Subcommands::SetupAi(options)) => {
+            if let Some(destination) = &options.ssh {
+                std::process::exit(crate::ssh_session::setup_ai_cli(destination, options.remove));
+            }
             std::process::exit(crate::ai_hook::setup_ai_cli(options.remove))
         },
         #[cfg(windows)]

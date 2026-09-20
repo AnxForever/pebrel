@@ -27,17 +27,6 @@ any = [
 ]
 
 [[rules]]
-id = "yes_no_blocker"
-state = "blocked"
-priority = 700
-region = "bottom_non_empty_lines(12)"
-any = [
-  { contains = ["[y/n]"] },
-  { contains = ["(y/n)"] },
-  { contains = ["yes (y)"] },
-]
-
-[[rules]]
 id = "working_status"
 state = "working"
 priority = 400

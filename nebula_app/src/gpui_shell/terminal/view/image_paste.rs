@@ -125,7 +125,7 @@ impl TerminalView {
         let owner = (
             self.running_program.clone(),
             self.ai_session.clone(),
-            self.primary_agent_pid,
+            self.agent_activity.primary_pid(),
             self.command_started,
         );
         let generation = self.image_paste.generation;
@@ -148,7 +148,7 @@ impl TerminalView {
                 let current_owner = (
                     view.running_program.clone(),
                     view.ai_session.clone(),
-                    view.primary_agent_pid,
+                    view.agent_activity.primary_pid(),
                     view.command_started,
                 );
                 if !same_term

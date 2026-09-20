@@ -64,6 +64,8 @@ impl TerminalView {
                 None,
             ),
         };
+        let ligatures =
+            cx.try_global::<Settings>().map(|settings| settings.ligatures).unwrap_or(true);
         let default_cursor_style = term_config.default_cursor_style;
         let (cell_w, line_h) = Self::cell_metrics(window, cx);
         // 像素口径与 viewport 上报一致（设备 px），避免首帧一次像素级差异。
@@ -214,11 +216,17 @@ impl TerminalView {
             answers: crate::assistant_answer::AnswerInbox::default(),
             answer_reader: None,
             confirmation: super::super::confirmation::ConfirmationState::default(),
-            font: mono_font(&families[0], FontWeight::NORMAL, FontStyle::Normal),
-            font_bold: mono_font(&families[1], FontWeight::BOLD, FontStyle::Normal),
-            font_italic: mono_font(&families[2], FontWeight::NORMAL, FontStyle::Italic),
-            font_bold_italic: mono_font(&families[3], FontWeight::BOLD, FontStyle::Italic),
+            font: mono_font(&families[0], FontWeight::NORMAL, FontStyle::Normal, ligatures),
+            font_bold: mono_font(&families[1], FontWeight::BOLD, FontStyle::Normal, ligatures),
+            font_italic: mono_font(&families[2], FontWeight::NORMAL, FontStyle::Italic, ligatures),
+            font_bold_italic: mono_font(
+                &families[3],
+                FontWeight::BOLD,
+                FontStyle::Italic,
+                ligatures,
+            ),
             font_size,
+            ligatures,
             cell_width_mode,
             font_offset_x,
             font_offset_y,
@@ -235,17 +243,15 @@ impl TerminalView {
             command_running_disproved: false,
             command_started: None,
             last_process_probe: None,
+            prompt_process_probe: None,
+            prompt_input_epoch: 0,
+            native_prompt_seen: false,
+            native_prompt_epoch: None,
+            last_prompt_process_probe: None,
             active_run: None,
             last_run: None,
-            agent_status: crate::ai_agents::AgentStatus::Unknown,
-            agent_status_source: crate::ai_agents::AgentStatusSource::Unknown,
-            agent_status_rule: None,
-            agent_hook_seen: false,
-            primary_agent_pid: None,
+            agent_activity: Default::default(),
             progress: crate::taskbar::TaskProgress::None,
-            agent_turn_active: false,
-            idle_screen_streak: 0,
-            agent_runtime_submit_pending: false,
             pending_runtime_submit: None,
             pending_shell_command: None,
             recovery: startup_command::SessionRecovery::default(),
@@ -292,6 +298,7 @@ impl TerminalView {
             cursor_blink_epoch: 0,
             cursor_window_active,
             cursor_pane_focused,
+            output_visible: true,
             _cursor_blink_subscriptions: cursor_blink_subscriptions,
             default_cursor_style,
             suggest: {

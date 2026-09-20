@@ -19,6 +19,8 @@ use std::time::{Duration, Instant, SystemTime};
 use regex::Regex;
 use serde::Deserialize;
 
+mod screen_context;
+
 /// AI clients Nebula can identify as a first-class terminal workload.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AgentKind {
@@ -349,7 +351,7 @@ fn is_agent_interpreter(token: &str) -> bool {
     )
 }
 
-/// Semantic state inferred from live application chrome.
+/// Semantic Agent state shared by lifecycle hooks and fallback observations.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum AgentStatus {
     Idle,
@@ -605,9 +607,15 @@ pub fn detect(program: &str, screen: &str) -> Option<Detection> {
     refresh_overrides_if_needed();
     let guard = cache().read().ok()?;
     let loaded = guard.manifests.get(&agent)?;
+    let attention_screen = screen_context::attention_region(agent, screen);
+    let live_input = screen_context::has_live_input_controls(attention_screen);
     let mut best: Option<(&Rule, &CompiledGate)> = None;
     for (rule, gate) in loaded.manifest.rules.iter().zip(&loaded.rules) {
-        let text = region(screen, &rule.region);
+        let blocked = matches!(rule.state, RuleState::Blocked);
+        if blocked && !live_input {
+            continue;
+        }
+        let text = region(if blocked { attention_screen } else { screen }, &rule.region);
         if !gate.matches(text) {
             continue;
         }

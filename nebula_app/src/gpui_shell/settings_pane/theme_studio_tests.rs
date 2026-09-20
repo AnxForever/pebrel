@@ -38,6 +38,48 @@ fn test_runtime() -> RuntimeSettings {
 }
 
 #[gpui::test]
+fn ligature_menu_defaults_on_and_persists_keyboard_choices(cx: &mut TestAppContext) {
+    use crate::gpui_shell::config::Settings;
+    use nebula_settings::Ligatures;
+
+    let _fixture_guard = lock_theme_studio();
+    let _settings_guard = SettingsBytesGuard::capture();
+    std::fs::create_dir_all(nebula_settings::settings_dir()).unwrap();
+    std::fs::write(nebula_settings::settings_path(), TEST_SETTINGS).unwrap();
+    let (pane, mut window) = open_settings(cx);
+    pane.update(&mut window, |pane, cx| {
+        pane.active_section = 1;
+        cx.notify();
+    });
+    window.simulate_resize(size(px(1280.0), px(1800.0)));
+    draw(&mut window);
+    assert_eq!(RuntimeSettings::load().ligatures, Ligatures::On);
+    assert!(window.read(|cx| cx.global::<Settings>().ligatures));
+    for (preference, enabled) in [(Ligatures::Off, false), (Ligatures::Theme, true)] {
+        click("settings-select-ligatures", &mut window);
+        press("down", &mut window);
+        press("enter", &mut window);
+        assert_eq!(RuntimeSettings::load().ligatures, preference);
+        assert_eq!(window.read(|cx| cx.global::<Settings>().ligatures), enabled);
+        let reopened = window.update(|window, cx| cx.new(|cx| SettingsPane::new(window, cx)));
+        reopened.read_with(&mut window, |pane, cx| {
+            assert_eq!(pane.runtime.ligatures, preference);
+            assert_eq!(
+                pane.select_of("ligatures").unwrap().read(cx).selected_index(cx).unwrap().row,
+                if preference == Ligatures::Off { 1 } else { 2 }
+            );
+        });
+    }
+    click("settings-select-ligatures", &mut window);
+    press("up", &mut window);
+    press("escape", &mut window);
+    assert_eq!(RuntimeSettings::load().ligatures, Ligatures::Theme, "Escape cancels the choice");
+    pane.read_with(&mut window, |pane, _| {
+        assert_eq!(pane.setting_override("ligatures"), Some((true, "on".into())));
+    });
+}
+
+#[gpui::test]
 fn scrolling_controls_persist_dropdown_and_slider_without_changing_existing_history(
     cx: &mut TestAppContext,
 ) {

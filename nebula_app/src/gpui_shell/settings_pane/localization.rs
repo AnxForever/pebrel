@@ -31,6 +31,14 @@ pub(super) fn localized_select_labels(
             language.text(crate::i18n::Message::SettingsQuickTerminalDedicated),
             language.text(crate::i18n::Message::SettingsQuickTerminalExisting),
         ],
+        "notification_duration" => vec![
+            language.text(crate::i18n::Message::SettingsNotificationsDurationDefault),
+            language.text(crate::i18n::Message::SettingsNotificationsDurationFive),
+            language.text(crate::i18n::Message::SettingsNotificationsDurationTen),
+            language.text(crate::i18n::Message::SettingsNotificationsDurationThirty),
+            language.text(crate::i18n::Message::SettingsNotificationsDurationNinety),
+            language.text(crate::i18n::Message::SettingsNotificationsDurationPersistent),
+        ],
         "cursor_shape" => vec![
             language.pick("条形（│）", "Bar (│)"),
             language.pick("下划线（_）", "Underscore (_)"),
@@ -58,6 +66,11 @@ pub(super) fn localized_select_labels(
             language.pick("自动检测", "Auto detect"),
             language.pick("仅 Git", "Git only"),
             language.pick("仅 SVN", "SVN only"),
+        ],
+        "ligatures" => vec![
+            language.text(crate::i18n::Message::SettingsFontLigaturesOn),
+            language.text(crate::i18n::Message::SettingsFontLigaturesOff),
+            language.text(crate::i18n::Message::SettingsFontLigaturesTheme),
         ],
         "cell_width_mode" => {
             vec![language.pick("紧凑", "Compact"), language.pick("宽松", "Relaxed")]
