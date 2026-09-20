@@ -980,7 +980,7 @@ mod tests {
             assert_eq!(terminal.nebula_prompt_input_point(), None);
         }
         stream.feed(&mut terminal, &VoidListener, b"\x1b]133;A\x07\x1b]133;B\x07");
-        terminal.resize(&TermSize::new(10, 2));
+        terminal.resize(TermSize::new(10, 2));
         assert_eq!(terminal.nebula_prompt_input_point(), None);
     }
 
