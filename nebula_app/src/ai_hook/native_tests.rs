@@ -9,7 +9,15 @@ fn non_successful_turns_do_not_emit_a_completion_notification() {
             Some(1),
         )
         .unwrap();
-        assert!(crate::notify::Notification::from_ai_hook(&event, None, false).is_none());
+        let notification = crate::notify::Notification::from_ai_hook(&event, None, false);
+        if reason == "aborted" {
+            assert!(notification.is_none());
+        } else {
+            let notification = notification.expect("failed turns report an issue");
+            assert!(notification.is_failure());
+            assert!(!notification.is_attention());
+            assert!(!matches!(notification, crate::notify::Notification::AiTurn { .. }));
+        }
     }
     let event = parse_remote_envelope(
         b"nebula-hook/1 source=pi\n{\"kind\":\"done\",\"stop_reason\":\"stop\"}",

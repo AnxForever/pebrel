@@ -16,6 +16,7 @@ const RESET_KEYS: &[&str] = &[
     "ui_font_family",
     "ui_font_size",
     "font_size",
+    "ligatures",
     "cursor_shape",
     "cursor_blink",
     "copy_on_select",
@@ -41,6 +42,7 @@ const RESET_KEYS: &[&str] = &[
     "vcs_display",
     "bell",
     "ai_toasts",
+    "notification_duration",
     "fetch",
     "auto_check_updates",
     "auto_download_updates",
@@ -154,6 +156,27 @@ mod tests {
         let restored = default_settings_text(original);
         assert_eq!(restored, "custom_data=keep\n");
         assert!(RuntimeSettings::from_raw(&RawSettings::from_text(&restored)).ai_toasts);
+    }
+
+    #[test]
+    fn resetting_preferences_restores_the_default_notification_duration() {
+        let original = "notification_duration=persistent\ncustom_data=keep\n";
+        let restored = default_settings_text(original);
+        let runtime = RuntimeSettings::from_raw(&RawSettings::from_text(&restored));
+        assert_eq!(runtime.notification_duration, crate::NotificationDuration::Default);
+        assert!(restored.contains("custom_data=keep"));
+        assert!(!restored.contains("notification_duration="));
+    }
+
+    #[test]
+    fn reset_enables_ligatures_even_after_following_a_theme() {
+        for value in ["off", "theme"] {
+            let restored = default_settings_text(&format!("ligatures={value}\ncustom=keep\n"));
+            assert_eq!(restored, "custom=keep\n");
+            let runtime = RuntimeSettings::from_raw(&RawSettings::from_text(&restored));
+            assert_eq!(runtime.ligatures, crate::Ligatures::On);
+            assert!(runtime.ligatures.enabled(Some(false)));
+        }
     }
 
     #[test]

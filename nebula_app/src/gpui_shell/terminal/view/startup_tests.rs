@@ -824,6 +824,34 @@ fn native_prompt_completion_clears_progress_without_another_enter(cx: &mut TestA
 }
 
 #[gpui::test]
+fn ligature_changes_update_all_faces_without_replacing_the_open_session(cx: &mut TestAppContext) {
+    let (view, window, _) = open(cx);
+    view.update(window, |view, cx| {
+        feed(view, b"a->b != c");
+        let term = view.session.as_ref().unwrap().term.clone();
+        for enabled in [false, true] {
+            cx.global_mut::<Settings>().ligatures = enabled;
+            view.apply_settings(cx);
+            assert_eq!(view.ligatures, enabled);
+            assert!(std::sync::Arc::ptr_eq(&term, &view.session.as_ref().unwrap().term));
+            for font in [&view.font, &view.font_bold, &view.font_italic, &view.font_bold_italic] {
+                for tag in ["calt", "liga", "clig"] {
+                    assert!(
+                        font.features.tag_value_list().contains(&(tag.into(), u32::from(enabled)))
+                    );
+                }
+            }
+            assert_eq!(
+                term.lock().grid()[nebula_terminal::index::Line(0)]
+                    [nebula_terminal::index::Column(1)]
+                .c,
+                '-'
+            );
+        }
+    });
+}
+
+#[gpui::test]
 fn ssh_tab_name_and_hover_preserve_host_identity_across_remote_titles(cx: &mut TestAppContext) {
     let (view, window, _) = open(cx);
     view.update(window, |view, cx| {

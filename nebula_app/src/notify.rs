@@ -104,6 +104,8 @@ pub enum Notification {
     /// CLI needs the user NOW (permission prompt / idle reminder) rather
     /// than "turn finished".
     AiTurn { program: String, message: Option<String>, attention: bool },
+    /// The provider stopped without a confirmed successful answer.
+    AiTurnIssue { program: String, message: Option<String>, outcome: crate::ai_hook::AiTurnOutcome },
 }
 
 /// Longest notification body any shell may render.
@@ -135,30 +137,54 @@ pub(crate) fn clamp_toast_body(body: &str) -> String {
 }
 
 impl Notification {
-    /// Failed, interrupted or incomplete provider turns must not announce completion.
     pub(crate) fn from_ai_hook(
         event: &crate::ai_hook::AiHookEvent,
         message: Option<String>,
         attention: bool,
     ) -> Option<Self> {
-        use crate::ai_hook::{AiHookKind, AiTurnOutcome};
-        if event.kind == AiHookKind::TurnDone
-            && (event.active_background_tasks() > 0
-                || matches!(
-                    event.turn_outcome,
-                    AiTurnOutcome::Failed | AiTurnOutcome::Cancelled | AiTurnOutcome::Incomplete
-                ))
-        {
-            return None;
+        use crate::ai_hook::AiTurnOutcome;
+        if event.kind == crate::ai_hook::AiHookKind::TurnDone {
+            if event.active_background_tasks() > 0 {
+                return None;
+            }
+            match event.turn_outcome {
+                AiTurnOutcome::Cancelled => return None,
+                AiTurnOutcome::Failed | AiTurnOutcome::Incomplete => {
+                    return Some(Self::AiTurnIssue {
+                        program: event.source.clone(),
+                        message,
+                        outcome: event.turn_outcome,
+                    });
+                },
+                AiTurnOutcome::Unknown if event.source == "pi" => {
+                    return Some(Self::AiTurnIssue {
+                        program: event.source.clone(),
+                        message: None,
+                        outcome: AiTurnOutcome::Unknown,
+                    });
+                },
+                _ => {},
+            }
         }
         Some(Self::AiTurn { program: event.source.clone(), message, attention })
+    }
+
+    pub(crate) fn is_failure(&self) -> bool {
+        matches!(
+            self,
+            Self::AiTurnIssue {
+                outcome: crate::ai_hook::AiTurnOutcome::Failed
+                    | crate::ai_hook::AiTurnOutcome::Incomplete,
+                ..
+            }
+        )
     }
 
     /// Source classification only. In-app preferences must not silence native
     /// notifications or infer an AI source from arbitrary message text.
     pub(crate) fn is_ai(&self) -> bool {
         let program = match self {
-            Self::AiTurn { .. } => return true,
+            Self::AiTurn { .. } | Self::AiTurnIssue { .. } => return true,
             Self::Bell { program }
             | Self::CommandDone { program, .. }
             | Self::Text { program, .. } => program.as_deref(),
@@ -176,7 +202,10 @@ impl Notification {
     pub(crate) fn raw_toast_text(&self) -> (String, String) {
         match self {
             Self::Bell { program } => match program {
-                Some(p) => (p.clone(), "任务完成，等待输入".to_owned()),
+                Some(p) => (
+                    p.clone(),
+                    notification_language().text(crate::i18n::Message::NotificationBell).to_owned(),
+                ),
                 None => (crate::brand::NAME.to_owned(), "终端响铃".to_owned()),
             },
             Self::CommandDone { duration, program } => {
@@ -205,11 +234,39 @@ impl Notification {
                 });
                 (program.clone(), body)
             },
+            Self::AiTurnIssue { program, message, outcome } => (
+                program.clone(),
+                turn_issue_text(*outcome, message.as_deref(), notification_language()),
+            ),
         }
     }
 
     pub(crate) fn is_attention(&self) -> bool {
         matches!(self, Self::AiTurn { attention: true, .. })
+    }
+}
+
+fn notification_language() -> crate::i18n::UiLanguage {
+    crate::i18n::LanguagePreference::from(nebula_settings::RuntimeSettings::load().language)
+        .resolved()
+}
+
+fn turn_issue_text(
+    outcome: crate::ai_hook::AiTurnOutcome,
+    message: Option<&str>,
+    language: crate::i18n::UiLanguage,
+) -> String {
+    use crate::ai_hook::AiTurnOutcome;
+    use crate::i18n::Message;
+    match outcome {
+        AiTurnOutcome::Failed => match message.filter(|message| !message.trim().is_empty()) {
+            Some(error) => {
+                language.format(Message::NotificationTurnFailedReason, &[("error", error)])
+            },
+            None => language.text(Message::NotificationTurnFailed).to_owned(),
+        },
+        AiTurnOutcome::Incomplete => language.text(Message::NotificationTurnIncomplete).to_owned(),
+        _ => language.text(Message::NotificationTurnEnded).to_owned(),
     }
 }
 
@@ -221,6 +278,69 @@ pub const COMMAND_NOTIFY_MIN: Duration = Duration::from_secs(10);
 /// flashes the taskbar (cheap, silent, coalesced by the shell) but skips the
 /// toast, so a build script ringing BEL in a loop cannot flood Action Center.
 const TOAST_THROTTLE: Duration = Duration::from_secs(3);
+
+/// Repeated failures from an automatic retry need one reminder, not a sound
+/// for every attempt. Different errors and source panes remain independent.
+const FAILURE_COOLDOWN: Duration = Duration::from_secs(30);
+
+#[derive(Default)]
+pub(crate) struct PaneFailureThrottle {
+    recent: Vec<RecentFailure>,
+}
+
+struct RecentFailure {
+    pane: u64,
+    program: String,
+    message: Option<String>,
+    outcome: crate::ai_hook::AiTurnOutcome,
+    shown_at: Instant,
+}
+
+impl PaneFailureThrottle {
+    pub(crate) const fn new() -> Self {
+        Self { recent: Vec::new() }
+    }
+
+    pub(crate) fn accepts(
+        &mut self,
+        pane: u64,
+        notification: &Notification,
+        delivering: bool,
+        now: Instant,
+    ) -> bool {
+        self.recent.retain(|last| now.saturating_duration_since(last.shown_at) < FAILURE_COOLDOWN);
+        // Recovery ends the old failure episode. A subsequent failure needs
+        // its own notice even if it reports the same provider error.
+        if matches!(notification, Notification::AiTurn { attention: false, .. }) {
+            self.recent.retain(|last| last.pane != pane);
+        }
+        if !delivering {
+            return false;
+        }
+        if !notification.is_failure() {
+            return true;
+        }
+        let Notification::AiTurnIssue { program, message, outcome } = notification else {
+            return true;
+        };
+        if self.recent.iter().any(|last| {
+            last.pane == pane
+                && last.program == *program
+                && last.message == *message
+                && last.outcome == *outcome
+        }) {
+            return false;
+        }
+        self.recent.push(RecentFailure {
+            pane,
+            program: program.clone(),
+            message: message.clone(),
+            outcome: *outcome,
+            shown_at: now,
+        });
+        true
+    }
+}
 
 #[cfg(any(feature = "gpui-shell", test))]
 #[derive(Default)]
@@ -327,6 +447,118 @@ fn spawn_toast(title: String, body: String, activation: Option<ToastActivation>)
 #[cfg(test)]
 mod delivery_tests {
     use super::*;
+
+    fn pi_result(reason: Option<&str>, message: Option<&str>) -> crate::ai_hook::AiHookEvent {
+        let payload = serde_json::json!({
+            "kind": "done", "stop_reason": reason, "message": message,
+        });
+        let envelope = format!("nebula-hook/1 source=pi pane=12\n{payload}");
+        crate::ai_hook::parse_remote_envelope(envelope.as_bytes(), Some(12)).unwrap()
+    }
+
+    #[test]
+    fn unfinished_background_tasks_suppress_every_terminal_turn_result() {
+        for reason in ["stop", "error", "length", "aborted"] {
+            let payload = serde_json::json!({
+                "kind": "done", "stop_reason": reason,
+                "background_tasks": [{"type": "local_bash", "status": "running"}],
+            });
+            let wire = format!("nebula-hook/1 source=pi pane=12\n{payload}");
+            let event = crate::ai_hook::parse_remote_envelope(wire.as_bytes(), Some(12)).unwrap();
+            assert_eq!(event.active_background_tasks(), 1);
+            assert!(Notification::from_ai_hook(&event, None, false).is_none(), "{reason}");
+        }
+    }
+
+    #[test]
+    fn pi_error_and_incomplete_results_are_not_completion_or_permission_notices() {
+        use crate::ai_hook::AiTurnOutcome;
+        for (reason, expected) in
+            [("error", AiTurnOutcome::Failed), ("length", AiTurnOutcome::Incomplete)]
+        {
+            let event = pi_result(Some(reason), Some("Our servers are currently overloaded."));
+            assert_eq!(event.turn_outcome, expected);
+            assert_eq!(event.kind, crate::ai_hook::AiHookKind::TurnDone);
+            // A stale screen permission prompt must not override a typed error.
+            let note = Notification::from_ai_hook(&event, event.message.clone(), true).unwrap();
+            assert!(note.is_failure());
+            assert!(note.is_ai());
+            assert!(!note.is_attention());
+            assert!(
+                matches!(note, Notification::AiTurnIssue { outcome, .. } if outcome == expected)
+            );
+        }
+        assert_eq!(
+            turn_issue_text(
+                AiTurnOutcome::Failed,
+                Some("overloaded"),
+                crate::i18n::UiLanguage::ZhCn
+            ),
+            "请求失败：overloaded"
+        );
+        assert_eq!(
+            turn_issue_text(AiTurnOutcome::Failed, None, crate::i18n::UiLanguage::EnUs),
+            "Request failed. Check the terminal for details."
+        );
+    }
+
+    #[test]
+    fn cancellation_is_silent_and_legacy_pi_outcomes_remain_unconfirmed() {
+        let cancelled = pi_result(Some("aborted"), None);
+        assert!(Notification::from_ai_hook(&cancelled, None, false).is_none());
+        let unknown = pi_result(None, None);
+        let note = Notification::from_ai_hook(&unknown, None, false).unwrap();
+        assert!(matches!(
+            note,
+            Notification::AiTurnIssue { outcome: crate::ai_hook::AiTurnOutcome::Unknown, .. }
+        ));
+        assert!(!note.is_failure());
+        assert!(!note.is_attention());
+        let success = pi_result(Some("stop"), None);
+        assert!(matches!(
+            Notification::from_ai_hook(&success, None, false),
+            Some(Notification::AiTurn { attention: false, .. })
+        ));
+    }
+
+    #[test]
+    fn repeated_failures_share_a_fixed_cooldown_without_hiding_recovery_or_new_errors() {
+        let event = pi_result(Some("error"), Some("overload"));
+        let failure = Notification::from_ai_hook(&event, event.message.clone(), false).unwrap();
+        let now = Instant::now();
+        let mut gate = PaneFailureThrottle::new();
+        assert!(gate.accepts(1, &failure, true, now));
+        assert!(gate.accepts(2, &failure, true, now));
+        assert!(!gate.accepts(1, &failure, true, now + Duration::from_secs(6)));
+        let success =
+            Notification::from_ai_hook(&pi_result(Some("stop"), None), None, false).unwrap();
+        let attention =
+            Notification::AiTurn { program: "pi".into(), message: None, attention: true };
+        assert!(gate.accepts(1, &attention, true, now + Duration::from_secs(7)));
+        assert!(!gate.accepts(1, &failure, true, now + Duration::from_secs(8)));
+        let other = pi_result(Some("error"), Some("authentication failed"));
+        let other = Notification::from_ai_hook(&other, other.message.clone(), false).unwrap();
+        assert!(gate.accepts(1, &other, true, now + Duration::from_secs(9)));
+        assert!(!gate.accepts(1, &failure, true, now + Duration::from_secs(29)));
+        assert!(gate.accepts(1, &failure, true, now + FAILURE_COOLDOWN));
+        assert!(
+            !gate.accepts(1, &success, false, now + Duration::from_secs(31)),
+            "visible recovery still ends the failure episode"
+        );
+        assert!(gate.accepts(1, &failure, true, now + Duration::from_secs(32)));
+    }
+
+    #[test]
+    fn incomplete_and_failed_without_details_are_distinct_notices() {
+        let mut gate = PaneFailureThrottle::new();
+        let now = Instant::now();
+        for reason in ["length", "error"] {
+            let event = pi_result(Some(reason), None);
+            let note = Notification::from_ai_hook(&event, None, false).unwrap();
+            assert!(gate.accepts(1, &note, true, now));
+            assert!(!gate.accepts(1, &note, true, now));
+        }
+    }
 
     #[test]
     fn every_registered_ai_is_recognized_for_bell_text_and_command_events() {
