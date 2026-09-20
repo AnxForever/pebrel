@@ -25,7 +25,16 @@ fn root_process() -> Vec<crate::process_tree::ProcessEntry> {
 fn custom_native_prompts_capture_recalled_input_and_keep_submission_epochs(
     cx: &mut gpui::TestAppContext,
 ) {
-    for prompt in ["[C:\\work] ", "[C:\\work]\r\n>", "", "工作目录 :: ", &"x".repeat(79)] {
+    for prompt in [
+        "[C:\\work] ",
+        "[C:\\work]\r\n>",
+        "",
+        "工作目录 :: ",
+        &"x".repeat(75),
+        &"x".repeat(79),
+        &"x".repeat(80),
+        &"x".repeat(160),
+    ] {
         let (view, window, _) = open(cx);
         view.update(window, |view, cx| {
             let (session, _input, mut events, proxy) = session::test_session_with_events();
@@ -74,7 +83,7 @@ fn custom_native_prompts_capture_recalled_input_and_keep_submission_epochs(
 fn custom_native_prompts_handle_empty_submit_paste_and_runtime_without_fake_history(
     cx: &mut gpui::TestAppContext,
 ) {
-    for prompt in ["", "[C:\\work] ", "[C:\\work]\r\n>"] {
+    for prompt in ["", "[C:\\work] ", "[C:\\work]\r\n>", &"x".repeat(80), &"x".repeat(160)] {
         for action in ["empty", "paste", "runtime"] {
             let (view, window, _) = open(cx);
             view.update(window, |view, cx| {

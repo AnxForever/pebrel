@@ -63,7 +63,10 @@ is guessed. Resized prompts need fresh boundary evidence for exact extraction.
 Regressions exercise split OSC input, scrolling, reset and reflow, plus rendered
 custom/multiline/empty/CJK/wrapped prompts, history recall, empty Enter, paste,
 runtime submission and stale prompt epochs. PR #215's existing nested-shell,
-process-failure and editing-key tests remain in the native suite.
+process-failure and editing-key tests remain in the native suite. A filled last
+cell is already part of echoed input even while the cursor is waiting to wrap.
+The full-width regression failed with a 75-column prompt plus `pause` before
+this correction; it also covers an empty full-width prompt at the bottom row.
 
 ## Supersedes
 

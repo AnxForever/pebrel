@@ -193,7 +193,13 @@ fn raw_grid_line_with_boundary<T: EventListener>(
     if columns == 0 {
         return None;
     }
-    let cursor_col = cursor.column.0.min(columns);
+    // A filled last cell leaves the cursor on that cell until another printable
+    // character wraps. Its contents already belong to the echoed input.
+    let cursor_col = if cursor == grid.cursor.point && grid.cursor.input_needs_wrap {
+        columns
+    } else {
+        cursor.column.0.min(columns)
+    };
 
     if grid[cursor.line][Column(columns - 1)].flags.contains(Flags::WRAPLINE) {
         return None;
@@ -234,7 +240,7 @@ fn raw_grid_line_with_boundary<T: EventListener>(
         }
     }
 
-    if input_start == Some(cursor) {
+    if input_start == Some(Point::new(cursor.line, Column(cursor_col))) {
         boundary = Some(text.len());
     }
     Some((text, boundary))
@@ -411,6 +417,41 @@ mod tests {
             raw_grid_logical_line(&terminal, accepted).as_deref(),
             Some("❯ echo native_hint")
         );
+    }
+
+    #[test]
+    fn semantic_prompt_input_handles_pending_wrap_and_bottom_row_scroll() {
+        use nebula_terminal::event::VoidListener;
+        use nebula_terminal::event_loop::StreamProcessor;
+        use nebula_terminal::grid::Grid;
+
+        for start_row in [1, 2] {
+            for prompt_len in [0, 75, 79, 80, 81, 160] {
+                for input in ["", "pause"] {
+                    let size = Grid::<Cell>::new(2, 80, 0);
+                    let mut terminal = Term::new(Default::default(), &size, VoidListener);
+                    let prompt = "x".repeat(prompt_len);
+                    let bytes =
+                        format!("\x1b[{start_row};1H\x1b]133;A\x07{prompt}\x1b]133;B\x07{input}");
+                    StreamProcessor::default().feed(&mut terminal, &VoidListener, bytes.as_bytes());
+                    let snapshot = nebula_prompt_line_from_raw_grid(
+                        &terminal,
+                        terminal.grid().cursor.point,
+                        "",
+                        &SuggestEnv::Local,
+                    )
+                    .unwrap_or_else(|| {
+                        panic!("row {start_row}, prompt {prompt_len}, input {input:?}")
+                    });
+                    assert_eq!(snapshot.prompt, prompt);
+                    assert_eq!(snapshot.input, input);
+                    assert_eq!(
+                        nebula_shell_ready_from_raw_grid(&terminal, &SuggestEnv::Local),
+                        input.is_empty()
+                    );
+                }
+            }
+        }
     }
 
     #[test]

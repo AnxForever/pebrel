@@ -64,6 +64,7 @@ impl<T> Term<T> {
     }
 
     /// Resolve the boundary after scrollback growth; reflow/reset discard it.
+    /// A column equal to the grid width denotes an empty pending-wrap boundary.
     pub fn nebula_prompt_input_point(&self) -> Option<Point> {
         if !self.nebula_prompt_active() {
             return None;
@@ -71,6 +72,15 @@ impl<T> Term<T> {
         let (line, column) = self.nebula_prompt_input?;
         if line < self.grid.scrolled_out() || column.0 >= self.columns() {
             return None;
+        }
+        // Until input is echoed, a full-width prompt's next insertion point is
+        // still on the filled row. This also covers the bottom row, where the
+        // eventual wrap will scroll the grid before displaying the input.
+        if self.grid.cursor.input_needs_wrap
+            && line == self.nebula_cursor_abs_line() + 1
+            && column == Column(0)
+        {
+            return Some(Point::new(self.grid.cursor.point.line, Column(self.columns())));
         }
         let relative =
             line as i64 - self.grid.scrolled_out() as i64 - self.grid.history_size() as i64;
