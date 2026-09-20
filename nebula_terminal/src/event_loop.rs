@@ -227,6 +227,7 @@ impl StreamProcessor {
                 OscEvent::PromptMark => {
                     terminal.nebula_add_prompt_mark();
                 },
+                OscEvent::PromptInput => terminal.nebula_mark_prompt_input(),
                 OscEvent::InlineImage { data, width, height } => {
                     let (cell_w, cell_h) = self.window_size.map_or((9.0, 20.0), |ws| {
                         (f32::from(ws.cell_width), f32::from(ws.cell_height))
@@ -946,6 +947,41 @@ mod tests {
                 "split at {split}"
             );
         }
+    }
+
+    #[test]
+    fn semantic_input_boundary_survives_chunking_and_scrolling() {
+        use crate::index::{Column, Line, Point};
+
+        let bytes = b"\x1b]133;A\x07[first]\r\n>\x1b]133;B\x07pause";
+        for split in 0..=bytes.len() {
+            let mut terminal = Term::new(Config::default(), &TermSize::new(20, 2), VoidListener);
+            let mut stream = StreamProcessor::default();
+            stream.feed(&mut terminal, &VoidListener, &bytes[..split]);
+            stream.feed(&mut terminal, &VoidListener, &bytes[split..]);
+            assert_eq!(terminal.nebula_prompt_input_point(), Some(Point::new(Line(1), Column(1))));
+            stream.feed(&mut terminal, &VoidListener, b"\r\n");
+            assert_eq!(terminal.nebula_prompt_input_point(), Some(Point::new(Line(0), Column(1))));
+            stream.feed(&mut terminal, &VoidListener, b"\x1b]133;C\x07");
+            assert_eq!(terminal.nebula_prompt_input_point(), None);
+        }
+    }
+
+    #[test]
+    fn input_boundaries_require_a_prompt_and_do_not_survive_reflow_or_reset() {
+        let mut terminal = Term::new(Config::default(), &TermSize::new(20, 2), VoidListener);
+        let mut stream = StreamProcessor::default();
+        stream.feed(&mut terminal, &VoidListener, b"\x1b]133;B\x07");
+        assert_eq!(terminal.nebula_prompt_input_point(), None);
+        for ending in [b"\x1bc".as_slice(), b"\x1b]133;D;0\x07", b"\x1b]133;A\x07"] {
+            stream.feed(&mut terminal, &VoidListener, b"\x1b]133;A\x07\x1b]133;B\x07");
+            assert!(terminal.nebula_prompt_input_point().is_some());
+            stream.feed(&mut terminal, &VoidListener, ending);
+            assert_eq!(terminal.nebula_prompt_input_point(), None);
+        }
+        stream.feed(&mut terminal, &VoidListener, b"\x1b]133;A\x07\x1b]133;B\x07");
+        terminal.resize(TermSize::new(10, 2));
+        assert_eq!(terminal.nebula_prompt_input_point(), None);
     }
 
     #[test]

@@ -63,6 +63,26 @@ pub(super) fn feed(view: &mut TerminalView, bytes: &[u8]) {
 }
 
 #[gpui::test]
+fn ended_command_does_not_leave_osc_progress_running(cx: &mut TestAppContext) {
+    let (view, window, _) = open(cx);
+    view.update(window, |view, cx| {
+        for exit_code in [Some(0), Some(1), None] {
+            view.process_event(Event::CommandStart, cx);
+            view.process_event(Event::Progress { state: 3, value: None }, cx);
+            assert_eq!(view.sidebar_activity(), SidebarActivity::Running);
+            view.process_event(Event::CommandDone { exit_code }, cx);
+            let expected = if exit_code.is_some_and(|code| code != 0) {
+                SidebarActivity::CommandFailed
+            } else {
+                SidebarActivity::Idle
+            };
+            assert_eq!(view.sidebar_activity(), expected);
+            assert_eq!(view.progress, crate::taskbar::TaskProgress::None);
+        }
+    });
+}
+
+#[gpui::test]
 fn ligature_changes_update_all_faces_without_replacing_the_open_session(cx: &mut TestAppContext) {
     let (view, window, _) = open(cx);
     view.update(window, |view, cx| {
@@ -164,6 +184,70 @@ fn review_regression_cold_resume_survives_initial_prompt_and_clears_on_exit(
         assert!(view.ai_session.is_none(), "both foreground fields must clear together");
         assert!(view.runtime_agent().is_none());
     }));
+}
+
+#[gpui::test]
+fn pi_cancelled_turn_becomes_idle_instead_of_completed(cx: &mut TestAppContext) {
+    let (view, window, _) = open(cx);
+    view.update(window, |view, cx| {
+        for payload in [
+            r#"{"kind":"prompt","session_id":"pi-cancelled-test"}"#,
+            r#"{"kind":"done","stop_reason":"aborted","session_id":"pi-cancelled-test"}"#,
+        ] {
+            let wire = format!("nebula-hook/1 source=pi\n{payload}");
+            let event = crate::ai_hook::parse_remote_envelope(wire.as_bytes(), Some(view.pane_id))
+                .expect("Pi hook");
+            assert!(view.handle_ai_hook(&event, cx));
+        }
+        assert_eq!(view.agent_activity.status(), crate::ai_agents::AgentStatus::Idle);
+    });
+}
+
+#[gpui::test]
+fn pi_outcomes_emit_only_the_matching_notification(cx: &mut TestAppContext) {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    let (view, window, _) = open(cx);
+    let notifications = Rc::new(RefCell::new(Vec::new()));
+    let observed = notifications.clone();
+    let _subscription = view.update(window, |_, cx| {
+        cx.subscribe(&view, move |_, _, event, _| {
+            if let TerminalViewEvent::Notification(notification) = event {
+                observed.borrow_mut().push(notification.clone());
+            }
+        })
+    });
+    for (reason, status, expected_count) in [
+        ("aborted", crate::ai_agents::AgentStatus::Idle, 0),
+        ("unknown", crate::ai_agents::AgentStatus::Idle, 1),
+        ("error", crate::ai_agents::AgentStatus::Idle, 2),
+        ("stop", crate::ai_agents::AgentStatus::Done, 3),
+    ] {
+        view.update(window, |view, cx| {
+            for payload in [
+                serde_json::json!({"kind": "prompt", "session_id": "pi-test"}),
+                serde_json::json!({"kind": "done", "stop_reason": reason, "session_id": "pi-test"}),
+            ] {
+                let wire = format!("nebula-hook/1 source=pi\n{payload}");
+                let event =
+                    crate::ai_hook::parse_remote_envelope(wire.as_bytes(), Some(view.pane_id))
+                        .expect("Pi hook");
+                assert!(view.handle_ai_hook(&event, cx));
+            }
+            assert_eq!(view.agent_activity.status(), status);
+        });
+        assert_eq!(notifications.borrow().len(), expected_count, "{reason}");
+    }
+    let notifications = notifications.borrow();
+    assert!(matches!(
+        &notifications[1],
+        crate::notify::Notification::AiTurnIssue {
+            outcome: crate::ai_hook::AiTurnOutcome::Failed,
+            ..
+        }
+    ));
+    assert!(!notifications[1].is_attention());
 }
 
 #[gpui::test]

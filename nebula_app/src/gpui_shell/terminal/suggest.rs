@@ -38,6 +38,14 @@ fn shared() -> MutexGuard<'static, Shared> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
+#[cfg(test)]
+pub(super) fn history_hint_for_test(
+    scope: &crate::nebula_history::HistoryScope,
+    prefix: &str,
+) -> Option<String> {
+    shared().history.hint(scope, prefix).map(str::to_owned)
+}
+
 /// 重算一个 pane 的 ghost/弹窗建议。`line_override` 是 grid 读出的屏幕真值
 /// （Windows 唯一行来源，见旧壳 `nebula_input_from_raw_grid` 的契约）。
 pub fn update(

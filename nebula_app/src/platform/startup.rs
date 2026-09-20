@@ -6,6 +6,29 @@ pub(crate) fn report_error(error: &dyn std::fmt::Display, gui_launch: bool) {
     let _ = (error, gui_launch);
 }
 
+#[cfg(windows)]
+mod console;
+
+/// Prepare process-wide GUI state before worker threads or terminal children exist.
+pub(crate) fn prepare_gui_process() -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        // Portable builds may not be on PATH. Non-PTY children need the same
+        // executable fallback that agent_env supplies for each terminal pane.
+        if let Ok(executable) = std::env::current_exe() {
+            // SAFETY: main calls this while startup is still single-threaded.
+            unsafe { std::env::set_var(crate::agent_env::CLI_ENV, executable) };
+        }
+        if std::env::var_os("NEBULA_DETACHED_LAUNCH").is_some() {
+            // Detach before either GUI event loop starts, so a launcher exiting
+            // cannot take the window down with its startup console.
+            unsafe { windows_sys::Win32::System::Console::FreeConsole() };
+        }
+        console::prepare_console_for_gui()?;
+    }
+    Ok(())
+}
+
 pub fn prepare_gui() {
     #[cfg(target_os = "macos")]
     {

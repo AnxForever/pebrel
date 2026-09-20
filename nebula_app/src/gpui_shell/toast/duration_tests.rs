@@ -44,21 +44,69 @@ fn settle_dismissal(cx: &mut VisualTestContext) {
     advance(cx, Duration::from_millis(250));
 }
 
+fn pi_completion() -> crate::notify::Notification {
+    crate::notify::Notification::AiTurn { program: "pi".into(), message: None, attention: false }
+}
+
+#[gpui::test]
+fn pi_completion_uses_five_seconds_only_when_the_user_keeps_the_default(cx: &mut TestAppContext) {
+    for (index, duration) in [
+        NotificationDuration::Default,
+        NotificationDuration::FiveSeconds,
+        NotificationDuration::TenSeconds,
+        NotificationDuration::ThirtySeconds,
+        NotificationDuration::NinetySeconds,
+        NotificationDuration::Persistent,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut window = open(duration, cx);
+        window.update(|window, cx| {
+            banner_for_pane(
+                window,
+                cx,
+                ToastKind::Info,
+                format!("Pi complete {duration:?}"),
+                84000 + index as u64,
+                &pi_completion(),
+            );
+        });
+        let original = ids(&mut window);
+        assert_eq!(original.len(), 1);
+        if let Some(timeout) = duration.timeout(Some(Duration::from_secs(5))) {
+            advance(&mut window, timeout - Duration::from_millis(1));
+            assert_eq!(ids(&mut window), original);
+            advance(&mut window, Duration::from_millis(1));
+            settle_dismissal(&mut window);
+            assert!(ids(&mut window).is_empty(), "{duration:?}");
+        } else {
+            advance(&mut window, Duration::from_secs(3600));
+            assert_eq!(ids(&mut window), original, "explicit persistent choice wins");
+        }
+    }
+}
+
 #[gpui::test]
 fn pane_result_replacement_preserves_other_panes_and_uses_the_selected_duration(
     cx: &mut TestAppContext,
 ) {
     let mut window = open(NotificationDuration::FiveSeconds, cx);
     let old = window.update(|window, cx| {
-        banner_for_pane(window, cx, ToastKind::Warning, "Overloaded", 83001, true);
+        let failure = crate::notify::Notification::AiTurnIssue {
+            program: "pi".into(),
+            message: None,
+            outcome: crate::ai_hook::AiTurnOutcome::Failed,
+        };
+        banner_for_pane(window, cx, ToastKind::Warning, "Overloaded", 83001, &failure);
         let old = window.notifications(cx)[0].clone();
-        banner_for_pane(window, cx, ToastKind::Info, "Other pane", 83002, true);
+        banner_for_pane(window, cx, ToastKind::Info, "Other pane", 83002, &pi_completion());
         old
     });
     let original = ids(&mut window);
     advance(&mut window, Duration::from_secs(4));
     window.update(|window, cx| {
-        banner_for_pane(window, cx, ToastKind::Info, "Recovered", 83001, true);
+        banner_for_pane(window, cx, ToastKind::Info, "Recovered", 83001, &pi_completion());
     });
     let replaced = ids(&mut window);
     assert_eq!(replaced.len(), 2);
