@@ -16,6 +16,25 @@ pub(crate) fn toast_clickable(title: &str, body: &str, activation: Option<ToastA
     toast_actionable(title, body, activation, Vec::new());
 }
 
+/// Dispatch owns the platform's worker and COM lifetime; notification policy
+/// remains in the application capability.
+pub(crate) fn dispatch(
+    title: String,
+    body: String,
+    activation: Option<ToastActivation>,
+    actions: Vec<ToastAction>,
+) {
+    #[cfg(windows)]
+    toast_actionable(&title, &body, activation, actions);
+    #[cfg(not(windows))]
+    if let Err(error) = std::thread::Builder::new()
+        .name("pebrel-toast".into())
+        .spawn(move || toast_actionable(&title, &body, activation, actions))
+    {
+        log::warn!("notify: failed to spawn toast thread: {error}");
+    }
+}
+
 #[cfg(target_os = "macos")]
 static MACOS_READY: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 

@@ -517,14 +517,7 @@ fn spawn_actionable_toast(
     activation: Option<ToastActivation>,
     actions: Vec<crate::platform::notifications::ToastAction>,
 ) {
-    #[cfg(windows)]
-    crate::platform::notifications::toast_actionable(&title, &body, activation, actions);
-    #[cfg(not(windows))]
-    if let Err(error) = std::thread::Builder::new().name("pebrel-toast".into()).spawn(move || {
-        crate::platform::notifications::toast_actionable(&title, &body, activation, actions)
-    }) {
-        log::warn!("notify: failed to spawn toast thread: {error}");
-    }
+    crate::platform::notifications::dispatch(title, body, activation, actions);
 }
 
 #[cfg(test)]

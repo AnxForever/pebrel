@@ -256,7 +256,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         #[cfg(windows)]
         Some(Subcommands::SetupAi(options)) => {
             if let Some(distro) = &options.wsl {
-                std::process::exit(crate::ai_hook::wsl::setup_cli(
+                std::process::exit(crate::platform::wsl_hooks::setup_cli(
                     distro,
                     options.wsl_user.as_deref(),
                     options.remove,

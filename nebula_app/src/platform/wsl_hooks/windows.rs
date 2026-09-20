@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use nebula_terminal::tty;
 use serde_json::json;
 
-use super::remote::{self, Action, Snapshot};
+use crate::ai_hook::remote::{self, Action, Snapshot};
 
 const BUDGET: Duration = Duration::from_secs(8);
 const MAX_OUTPUT: u64 = 20 * 1024 * 1024;

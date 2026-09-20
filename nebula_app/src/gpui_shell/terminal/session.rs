@@ -158,8 +158,7 @@ pub(super) fn local_options(
     // 身份契约必须最后写：它以环境表里 `WSLENV` 的现值为基准合并，才能同时
     // 保住上面那段的 cwd 上报条目。见 [`crate::agent_env`]。
     crate::agent_env::apply(&mut options.env, pane_id);
-    #[cfg(windows)]
-    crate::ai_hook::wsl::prepare(&mut options);
+    crate::platform::wsl_hooks::prepare(&mut options);
     options
 }
 

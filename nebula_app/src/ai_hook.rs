@@ -18,8 +18,6 @@ mod ordering;
 mod payload;
 mod protocol;
 pub(crate) mod remote;
-#[cfg(windows)]
-pub(crate) mod wsl;
 
 pub(crate) use event::CodexHookMode;
 pub use event::{
