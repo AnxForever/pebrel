@@ -836,7 +836,7 @@ impl NebulaWorkspace {
                 self.render_sidebar(window, cx).into_any_element()
             };
         }
-        let width = self.sidebar_width;
+        let width = self.sidebar_closing_width.unwrap_or(self.sidebar_width);
         let (from, to) = if collapsed { (width, 0.0) } else { (0.0, width) };
         div()
             .h_full()
@@ -851,13 +851,11 @@ impl NebulaWorkspace {
             .into_any_element()
     }
 
-    /// 侧栏模式的标题栏：左边侧栏开关 + 齿轮，右边目录树 + Git，中间在侧栏
+    /// 侧栏模式的标题栏：左边侧栏开关 + 齿轮，右边共享详情侧栏，中间在侧栏
     /// 折叠时顶上活动 tab 的名字。与顶部 tab 模式的 [`Self::render_top_title_bar`]
     /// 对称——两种布局各自持有自己那条标题带的全部内容。
     pub(super) fn render_sidebar_title_bar(
         &self,
-        files_active: bool,
-        git_active: bool,
         settings_active: bool,
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
@@ -931,33 +929,7 @@ impl NebulaWorkspace {
                                 this.toggle_command_manager(window, cx);
                             })),
                     )
-                    .child(
-                        Button::new("toggle-file-tree")
-                            .icon(if files_active {
-                                IconName::FolderOpen
-                            } else {
-                                IconName::FolderClosed
-                            })
-                            .ghost()
-                            .selected(files_active)
-                            .tooltip("目录树 (Ctrl+Shift+F)")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.toggle_file_tree(cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("toggle-git-tree")
-                            .icon(IconName::Github)
-                            .ghost()
-                            .selected(git_active)
-                            .tooltip(
-                                crate::gpui_shell::config::ui_language(cx)
-                                    .text(crate::i18n::Message::VcsToggleGit),
-                            )
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.toggle_git_tree(cx);
-                            })),
-                    ),
+                    .child(self.render_right_sidebar_button(settings_active, cx)),
             )
             .into_any_element()
     }

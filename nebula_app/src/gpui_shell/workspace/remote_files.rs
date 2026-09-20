@@ -442,7 +442,6 @@ impl NebulaWorkspace {
     pub(super) fn render_remote_files(&mut self, cx: &mut Context<'_, Self>) -> gpui::AnyElement {
         // 视图切换条先建：它要可变借 `cx`，而下面取的主题色是从 `cx` 借出来的
         // 不可变引用。顺序颠倒的话两个借用会重叠。
-        let view_switch = self.render_side_panel_switch(cx).into_any_element();
         let transfer_status = self.render_remote_transfer_status(cx);
         let skip_unchanged = self.remote_browser.skip_unchanged;
         let transfer_working = self.remote_transfer_working();
@@ -472,7 +471,8 @@ impl NebulaWorkspace {
 
         v_flex()
             .h_full()
-            .w(px(320.0))
+            .w_full()
+            .min_w_0()
             .flex_shrink_0()
             .p_2()
             .gap_2()
@@ -487,7 +487,6 @@ impl NebulaWorkspace {
                 cx.stop_propagation();
                 this.drop_upload_paths(vec![file.local_path.clone()], None, window, cx);
             }))
-            .child(view_switch)
             .child(div().px(px(TEXT_INSET)).text_xs().text_color(muted)
                 .child(workspace_ui_language().text(if crate::platform::file_drag::supported() {
                     crate::i18n::Message::TransferDragHint

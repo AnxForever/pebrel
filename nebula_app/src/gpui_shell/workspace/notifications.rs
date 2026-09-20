@@ -3,6 +3,9 @@ use gpui::{Context, Window};
 use super::{NebulaWorkspace, WorkspaceTab};
 use crate::notify::Notification;
 
+static FAILURES: std::sync::Mutex<crate::notify::PaneFailureThrottle> =
+    std::sync::Mutex::new(crate::notify::PaneFailureThrottle::new());
+
 fn source_is_visible(window_active: bool, source_active: bool, overlay_open: bool) -> bool {
     window_active && source_active && !overlay_open
 }
@@ -51,13 +54,21 @@ impl NebulaWorkspace {
             visible,
             crate::gpui_shell::config::ai_toasts_enabled(cx),
         );
-        if !delivery.in_app && !delivery.system {
-            return;
-        }
         let source_view =
             panes.iter().find(|pane| pane.id == pane_id).map(|pane| pane.view.clone());
         if !visible && let Some(meta) = self.tab_meta.get_mut(tab_index) {
             meta.has_bell = true;
+        }
+        // Apply once before either channel, so retry errors cannot sound via
+        // the native channel after their in-app duplicate was suppressed.
+        if !FAILURES.lock().unwrap_or_else(|error| error.into_inner()).accepts(
+            pane_id,
+            &notification,
+            delivery.in_app || delivery.system,
+            std::time::Instant::now(),
+        ) {
+            cx.notify();
+            return;
         }
         if delivery.in_app {
             let attention = notification.is_attention();
@@ -68,7 +79,7 @@ impl NebulaWorkspace {
             };
             // Log the original message before the banner creates a bounded preview.
             let (title, body) = notification.raw_toast_text();
-            let kind = if attention {
+            let kind = if attention || notification.is_failure() {
                 crate::display::ToastKind::Warning
             } else {
                 crate::display::ToastKind::Info

@@ -64,6 +64,8 @@ impl TerminalView {
                 None,
             ),
         };
+        let ligatures =
+            cx.try_global::<Settings>().map(|settings| settings.ligatures).unwrap_or(true);
         let default_cursor_style = term_config.default_cursor_style;
         let (cell_w, line_h) = Self::cell_metrics(window, cx);
         // 像素口径与 viewport 上报一致（设备 px），避免首帧一次像素级差异。
@@ -214,11 +216,17 @@ impl TerminalView {
             answers: crate::assistant_answer::AnswerInbox::default(),
             answer_reader: None,
             confirmation: super::super::confirmation::ConfirmationState::default(),
-            font: mono_font(&families[0], FontWeight::NORMAL, FontStyle::Normal),
-            font_bold: mono_font(&families[1], FontWeight::BOLD, FontStyle::Normal),
-            font_italic: mono_font(&families[2], FontWeight::NORMAL, FontStyle::Italic),
-            font_bold_italic: mono_font(&families[3], FontWeight::BOLD, FontStyle::Italic),
+            font: mono_font(&families[0], FontWeight::NORMAL, FontStyle::Normal, ligatures),
+            font_bold: mono_font(&families[1], FontWeight::BOLD, FontStyle::Normal, ligatures),
+            font_italic: mono_font(&families[2], FontWeight::NORMAL, FontStyle::Italic, ligatures),
+            font_bold_italic: mono_font(
+                &families[3],
+                FontWeight::BOLD,
+                FontStyle::Italic,
+                ligatures,
+            ),
             font_size,
+            ligatures,
             cell_width_mode,
             font_offset_x,
             font_offset_y,
@@ -285,6 +293,7 @@ impl TerminalView {
             cursor_blink_epoch: 0,
             cursor_window_active,
             cursor_pane_focused,
+            output_visible: true,
             _cursor_blink_subscriptions: cursor_blink_subscriptions,
             default_cursor_style,
             suggest: {
