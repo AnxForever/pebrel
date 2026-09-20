@@ -83,8 +83,17 @@ fn custom_native_prompts_capture_recalled_input_and_keep_submission_epochs(
 fn custom_native_prompts_handle_empty_submit_paste_and_runtime_without_fake_history(
     cx: &mut gpui::TestAppContext,
 ) {
-    for prompt in ["", "[C:\\work] ", "[C:\\work]\r\n>", &"x".repeat(80), &"x".repeat(160)] {
+    let nonce =
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    for (index, prompt) in ["", "[C:\\work] ", "[C:\\work]\r\n>", &"x".repeat(80), &"x".repeat(160)]
+        .into_iter()
+        .enumerate()
+    {
         for action in ["empty", "paste", "runtime"] {
+            let prefix = format!("echo pebrel_native_history_{nonce}_{index}_{action}");
+            let command = format!("{prefix} echoed");
+            let scope = crate::nebula_history::HistoryScope::Local;
+            assert_eq!(suggest::history_hint_for_test(&scope, &prefix), None);
             let (view, window, _) = open(cx);
             view.update(window, |view, cx| {
                 let (session, _input, _events, proxy) = session::test_session_with_events();
@@ -101,15 +110,33 @@ fn custom_native_prompts_handle_empty_submit_paste_and_runtime_without_fake_hist
                 ));
                 match action {
                     "empty" => view.commit_line(cx),
-                    "paste" => view.paste_now_impl("pause\r\n", false, cx),
+                    "paste" => view.paste_now_impl(&format!("{command}\r\n"), false, cx),
                     _ => {
-                        view.runtime_prompt("pause".into(), true, cx).unwrap();
+                        view.runtime_prompt(command.clone(), true, cx).unwrap();
                     },
                 }
                 assert_eq!(view.command_running, action != "empty", "{prompt:?} {action}");
-                assert!(view.suggest.last_committed.is_empty(), "unconfirmed input is not history");
+                // Runtime keeps the submitted program identity before its echo
+                // barrier. Persistent history must still wait for screen input.
+                let identity = if action == "runtime" { command.as_str() } else { "" };
+                assert_eq!(view.suggest.last_committed, identity, "{prompt:?} {action}");
+                assert_eq!(
+                    suggest::history_hint_for_test(&scope, &prefix),
+                    None,
+                    "unconfirmed input is not history: {prompt:?} {action}"
+                );
                 if action != "empty" {
                     assert!(view.suggest.pending_command_prompt.is_some());
+                } else {
+                    // Positive control reads the same history owner after real
+                    // terminal echo and Enter, including pending-wrap prompts.
+                    feed(view, command.as_bytes());
+                    view.commit_line(cx);
+                    assert_eq!(view.suggest.last_committed, command);
+                    assert_eq!(
+                        suggest::history_hint_for_test(&scope, &prefix).as_deref(),
+                        Some(" echoed")
+                    );
                 }
             });
         }
