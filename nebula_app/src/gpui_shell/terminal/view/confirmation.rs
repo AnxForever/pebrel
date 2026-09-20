@@ -86,18 +86,14 @@ impl TerminalView {
                     {
                         return;
                     }
-                    let key = gpui::Keystroke {
-                        modifiers: Default::default(),
-                        key: "enter".into(),
-                        key_char: None,
-                    };
-                    if let Some(bytes) = super::super::keymap::encode_for_program(
-                        &key,
-                        &view.term_mode(),
+                    let bytes = crate::input::terminal_input::build_runtime_sequence_for_program(
+                        crate::runtime_api::RuntimeKey::Enter,
+                        Default::default(),
+                        1,
+                        view.term_mode(),
                         view.running_program.as_deref(),
-                    ) {
-                        view.write_input(bytes, cx);
-                    }
+                    );
+                    view.write_input(bytes, cx);
                 });
                 return;
             }
@@ -147,17 +143,22 @@ mod tests {
         view: &mut TerminalView,
         program: &str,
         prompt: &str,
+        session: &str,
         cx: &mut Context<TerminalView>,
     ) {
         view.session.as_ref().unwrap().term.lock().set_options(nebula_terminal::term::Config {
             kitty_keyboard: true,
             ..Default::default()
         });
-        let wire = if program == "codex" {
-            "nebula-hook/1 source=codex codex_hooks=full\n{\"hook_event_name\":\"PermissionRequest\",\"session_id\":\"confirmation-test\"}"
+        let header = if program == "codex" {
+            "nebula-hook/1 source=codex codex_hooks=full"
         } else {
-            "nebula-hook/1 source=claude\n{\"hook_event_name\":\"PermissionRequest\",\"session_id\":\"confirmation-test\"}"
+            "nebula-hook/1 source=claude"
         };
+        let wire = format!(
+            "{header}\n{}",
+            serde_json::json!({"hook_event_name":"PermissionRequest", "session_id":session})
+        );
         let event = crate::ai_hook::parse_remote_envelope(wire.as_bytes(), Some(42)).unwrap();
         view.handle_ai_hook(&event, cx);
         feed(view, prompt.replace('\n', "\r\n").as_bytes());
@@ -174,13 +175,10 @@ mod tests {
     }
 
     #[gpui::test]
-    fn binary_answers_send_text_then_negotiated_enter_and_manual_input_cancels_it(
-        cx: &mut TestAppContext,
-    ) {
+    fn binary_answers_separate_legacy_enter_and_cancel_after_manual_input(cx: &mut TestAppContext) {
         let (view, window, receiver) = open(cx);
         view.update(window, |view, cx| {
-            waiting(view, "claude", "Allow operation? [Y/n]", cx);
-            feed(view, b"\x1b[>1u");
+            waiting(view, "claude", "Allow operation? [Y/n]", "confirmation-test-legacy", cx);
             let request = view.capture_confirmation().unwrap();
             assert!(view.answer_choice(request.id, 0, cx));
         });
@@ -207,18 +205,36 @@ mod tests {
     }
 
     #[gpui::test]
+    fn binary_confirmation_releases_text_and_enter_when_key_events_are_requested(
+        cx: &mut TestAppContext,
+    ) {
+        let (view, window, receiver) = open(cx);
+        view.update(window, |view, cx| {
+            waiting(view, "claude", "Allow operation? [Y/n]", "confirmation-test-key-events", cx);
+            feed(view, b"\x1b[>10u");
+            let request = view.capture_confirmation().unwrap();
+            assert!(view.answer_choice(request.id, 0, cx));
+        });
+        assert_eq!(input(&receiver), [b"\x1b[89u\x1b[89;1:3u".to_vec()]);
+        window.run_until_parked();
+        window.background_executor.advance_clock(Duration::from_millis(80));
+        window.run_until_parked();
+        assert_eq!(input(&receiver), [b"\x1b[13u\x1b[13;1:3u".to_vec()]);
+    }
+
+    #[gpui::test]
     fn numbered_codex_answers_send_one_key_without_enter(cx: &mut TestAppContext) {
         let (view, window, receiver) = open(cx);
         view.update(window, |view, cx| {
-            waiting(view, "codex", "Question 1/1 (1 unanswered)\nChoose a scope.\n› 1. Current\n  2. All\ntab to add notes | enter to submit answer | esc to interrupt", cx);
-            feed(view, b"\x1b[>8u");
+            waiting(view, "codex", "Question 1/1 (1 unanswered)\nChoose a scope.\n› 1. Current\n  2. All\ntab to add notes | enter to submit answer | esc to interrupt", "confirmation-test-numbered", cx);
+            feed(view, b"\x1b[>10u");
             assert!(view.term_mode().contains(nebula_terminal::term::TermMode::REPORT_ALL_KEYS_AS_ESC));
             let request = view.capture_confirmation().unwrap();
             assert_eq!(request.choices, ["Current", "All"]);
             assert!(view.answer_choice(request.id, 1, cx));
             assert!(!view.answer_choice(request.id, 0, cx));
         });
-        assert_eq!(input(&receiver), [b"\x1b[50u".to_vec()]);
+        assert_eq!(input(&receiver), [b"\x1b[50u\x1b[50;1:3u".to_vec()]);
         window.run_until_parked();
         window.background_executor.advance_clock(Duration::from_millis(800));
         window.run_until_parked();

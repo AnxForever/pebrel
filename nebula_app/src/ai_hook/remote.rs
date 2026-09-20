@@ -1,4 +1,4 @@
-//! SSH installation policy. This module plans owned file edits; it never opens
+//! POSIX hook installation policy. This module plans owned file edits; it never opens
 //! a connection, changes a terminal, or interprets screen output.
 
 use std::collections::BTreeMap;

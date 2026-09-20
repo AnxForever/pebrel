@@ -229,7 +229,7 @@ fn kitty_sequence(ks: &Keystroke, mode: &TermMode, synthetic: bool) -> Option<Ve
         };
         (Key::Character(character.to_string().into()), Key::Character(base.to_string().into()))
     };
-    let input = KeyInput {
+    let mut input = KeyInput {
         logical_key,
         state: ElementState::Pressed,
         location: KeyLocation::Standard,
@@ -251,7 +251,12 @@ fn kitty_sequence(ks: &Keystroke, mode: &TermMode, synthetic: bool) -> Option<Ve
     modifiers.set(ModifiersState::ALT, ks.modifiers.alt);
     modifiers.set(ModifiersState::CONTROL, ks.modifiers.control);
     modifiers.set(ModifiersState::SUPER, ks.modifiers.platform);
-    Some(build_sequence(&input, modifiers, *mode))
+    let mut bytes = build_sequence(&input, modifiers, *mode);
+    if synthetic && mode.contains(TermMode::REPORT_EVENT_TYPES) {
+        input.state = ElementState::Released;
+        bytes.extend(build_sequence(&input, modifiers, *mode));
+    }
+    Some(bytes)
 }
 
 /// These Windows chords must reach DefWindowProc so the existing close guard

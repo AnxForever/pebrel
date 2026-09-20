@@ -309,11 +309,11 @@ fn unix_time_ms() -> u64 {
         .map_or(0, |duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
 }
 
-/// 远端会话只能提交事件语义，Pane 身份始终由本地 SSH 通道覆盖，
+/// 远端会话只能提交事件语义，Pane 身份始终由本地 PTY 通道覆盖，
 /// 防止远端载荷把通知路由到同一窗口中的其他标签页。
 pub(crate) fn parse_remote_envelope(bytes: &[u8], pane: Option<u64>) -> Option<AiHookEvent> {
     let mut event = parse_envelope(bytes)?;
-    // Only this entrypoint is reached after SSH token verification. Ignore
+    // Only this entrypoint is reached after SSH/WSL token verification. Ignore
     // claimed process metadata on the local named-pipe path.
     let header = std::str::from_utf8(bytes.split(|byte| *byte == b'\n').next()?).ok()?;
     event.remote_process = header.split_whitespace().find_map(|field| {
