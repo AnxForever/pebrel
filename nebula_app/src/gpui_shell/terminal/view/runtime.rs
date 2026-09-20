@@ -159,7 +159,7 @@ impl TerminalView {
         exit_code: Option<i32>,
         cx: &mut Context<Self>,
     ) {
-        self.notify_command_done(cx);
+        self.notify_command_done(exit_code, cx);
         self.last_command_failed = exit_code.is_some_and(|code| code != 0);
         if self.clear_foreground_agent_state(cx) {
             cx.emit(TerminalViewEvent::TitleChanged);
