@@ -321,6 +321,16 @@
     "link_open_url_failed": "无法打开链接: {error}"
   },
   "editor": {
+    "bold_selection": "选中文字加粗（Ctrl+B / ⌘B）",
+    "italic_selection": "选中文字斜体（Ctrl+I / ⌘I）",
+    "release_to_close_sidebar": "松开收起侧栏",
+    "document_actions": "文档操作",
+    "source": "源码",
+    "edit_in_place": "编辑",
+    "finish_editing": "完成",
+    "finish_editing_shortcut": "结束编辑（Ctrl+Enter / ⌘Enter）",
+    "edit_block": "编辑此段落",
+    "right_sidebar": "展开或收起右侧栏",
     "loading": "正在读取文件…",
     "save": "保存",
     "saving": "正在保存…",

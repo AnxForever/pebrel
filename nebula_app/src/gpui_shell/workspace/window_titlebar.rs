@@ -80,8 +80,6 @@ pub(super) fn paint_pane_dividers(
 impl NebulaWorkspace {
     pub(super) fn render_window_title_bar(
         &self,
-        files_active: bool,
-        git_active: bool,
         settings_active: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -100,8 +98,6 @@ impl NebulaWorkspace {
             })
             .when(top_tabs, |bar| {
                 bar.child(self.render_top_title_bar(
-                    files_active,
-                    git_active,
                     settings_active,
                     window,
                     cx,
@@ -109,8 +105,6 @@ impl NebulaWorkspace {
             })
             .when(!top_tabs, |bar| {
                 bar.child(self.render_sidebar_title_bar(
-                    files_active,
-                    git_active,
                     settings_active,
                     cx,
                 ))

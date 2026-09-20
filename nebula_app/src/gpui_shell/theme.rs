@@ -20,7 +20,10 @@ struct DocumentColors {
 impl gpui::Global for DocumentColors {}
 
 pub(crate) fn code_block_background(cx: &App) -> Hsla {
-    cx.try_global::<DocumentColors>().map_or(cx.theme().secondary, |colors| colors.background)
+    let base =
+        cx.try_global::<DocumentColors>().map_or(cx.theme().background, |colors| colors.background);
+    // Code keeps the document palette, with a distinct surface in either mode.
+    base.blend(cx.theme().foreground.opacity(if cx.theme().is_dark() { 0.08 } else { 0.045 }))
 }
 
 pub(crate) fn code_block_foreground(cx: &App) -> Hsla {
@@ -493,6 +496,15 @@ pub fn settings_hairline(cx: &App) -> Hsla {
     // 取更低的 alpha。
     let alpha = if sk.is_light { 20 } else { 18 };
     wash(Rgba::new(sk.ink.r, sk.ink.g, sk.ink.b, alpha))
+}
+
+/// Component focus is an input-modality signal. Pointer clicks already show a
+/// caret, an open menu, or a pressed/selected state, so repeating that state as
+/// a dark outline makes the control look stuck. Keyboard navigation keeps the
+/// accent ring; pointer interaction folds the ring into the normal input line.
+pub fn sync_component_focus_ring(window: &Window, cx: &mut App) {
+    let ring = if window.last_input_was_keyboard() { cx.theme().link } else { cx.theme().input };
+    Theme::global_mut(cx).ring = ring;
 }
 
 pub fn settings_hover_bg(cx: &App, strong: bool) -> Hsla {
