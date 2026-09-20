@@ -368,7 +368,7 @@ fn runtime_background(
 }
 
 /// 主题叠加在 toml 配色之上（镜像旧壳 `apply_term_colors` 的范围与次序）：
-/// 背景永远替换；Powerline 槽位 16..=23 替换。原有主题保持旧合同：仅浅色
+/// 背景永远替换；保留应用使用的扩展色槽。原有主题保持旧合同：仅浅色
 /// 主题替换前景与 ANSI-16；自带完整 palette 的主题（Nord/Paper）应用其明确色表。
 fn apply_theme(palette: &mut Palette, theme: nebula_settings::ThemeName) {
     let resolved = crate::gpui_shell::theme::ResolvedTheme::builtin(theme, None);
@@ -405,9 +405,6 @@ fn apply_resolved_theme(palette: &mut Palette, resolved: &crate::gpui_shell::the
         return;
     }
     palette.background = rgba8(term.background);
-    for (i, color) in term.powerline.into_iter().enumerate() {
-        set_indexed(palette, nebula_settings::POWERLINE_SLOT0 + i as u8, rgba8(color));
-    }
     if let Some(exact) = term.exact {
         let foreground = rgba8(resolved.foreground_override().unwrap_or(exact.foreground));
         palette.foreground = foreground;
@@ -445,11 +442,6 @@ fn apply_resolved_theme(palette: &mut Palette, resolved: &crate::gpui_shell::the
             }
         }
     }
-}
-
-fn set_indexed(palette: &mut Palette, index: u8, color: gpui::Rgba) {
-    palette.indexed.retain(|(existing, _)| *existing != index);
-    palette.indexed.push((index, color));
 }
 
 fn rgba8(color: nebula_settings::Rgb8) -> gpui::Rgba {
@@ -815,6 +807,62 @@ mod tests {
 
         settings.cursor_blink = Some(false);
         assert!(!settings.term_config().default_cursor_style.blinking);
+    }
+
+    #[test]
+    fn builtin_themes_preserve_application_extended_colors() {
+        use nebula_terminal::term::color::Colors;
+        use nebula_terminal::vte::ansi::{Color, Rgb};
+
+        for theme in ThemeName::BUILTIN {
+            let mut palette = Palette::default();
+            apply_theme(&mut palette, theme);
+            let overrides = Colors::default();
+            for (index, expected) in [
+                (16, [0, 0, 0]),
+                (17, [0, 0, 95]),
+                (18, [0, 0, 135]),
+                (19, [0, 0, 175]),
+                (20, [0, 0, 215]),
+                (21, [0, 0, 255]),
+                (22, [0, 95, 0]),
+                (23, [0, 95, 95]),
+                (231, [255, 255, 255]),
+                (255, [238, 238, 238]),
+            ] {
+                assert_eq!(
+                    palette.resolve(Color::Indexed(index), &overrides, false),
+                    rgba8(expected),
+                    "{} index {index}",
+                    theme.prompt_name()
+                );
+                assert_eq!(
+                    palette.query_reply(index as usize, &overrides),
+                    Rgb { r: expected[0], g: expected[1], b: expected[2] }
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn theme_switches_preserve_user_extended_colors_and_osc_overrides() {
+        use nebula_terminal::term::color::Colors;
+        use nebula_terminal::vte::ansi::{Color, Rgb};
+
+        let configured = [12, 34, 56];
+        let osc = Rgb { r: 78, g: 90, b: 123 };
+        let mut palette = Palette::default();
+        palette.indexed.push((16, rgba8(configured)));
+        for theme in ThemeName::BUILTIN {
+            apply_theme(&mut palette, theme);
+            let mut overrides = Colors::default();
+            assert_eq!(palette.resolve(Color::Indexed(16), &overrides, false), rgba8(configured));
+            overrides[16] = Some(osc);
+            assert_eq!(palette.resolve(Color::Indexed(16), &overrides, false), rgba8([78, 90, 123]));
+            assert_eq!(palette.query_reply(16, &overrides), osc);
+            overrides[16] = None;
+            assert_eq!(palette.query_reply(16, &overrides), Rgb { r: 12, g: 34, b: 56 });
+        }
     }
 
     #[test]
