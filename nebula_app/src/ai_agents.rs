@@ -1061,6 +1061,24 @@ mod tests {
     }
 
     #[test]
+    fn codex_queue_and_compaction_are_live_work_only_in_the_chrome_tail() {
+        for chrome in [
+            "• Working (12s · esc to interrupt)\n• Messages to be submitted after next tool call (press esc to interrupt and send immediately)\n  ↳ Continue the task",
+            "• Compacting context (1m 41s · esc to interrupt)\n  └ Making room to continue.",
+        ] {
+            let frame = format!("{chrome}\n› Ask Codex to do anything\ngpt-6 max · /project");
+            assert_eq!(detect("codex", &frame).unwrap().status, AgentStatus::Working);
+            let stale = format!(
+                "{chrome}\n{}› Ask Codex to do anything\ngpt-6 max · /project",
+                "completed output\n".repeat(20)
+            );
+            assert_eq!(detect("codex", &stale).unwrap().status, AgentStatus::Idle);
+        }
+        let quoted = "The log said Compacting context; Messages to be submitted after next tool call\n› Ask Codex to do anything\ngpt-6 max · /project";
+        assert_eq!(detect("codex", quoted).unwrap().status, AgentStatus::Idle);
+    }
+
+    #[test]
     fn real_codex_idle_chrome_reads_idle() {
         // codex 早已答完，屏幕上就是空闲输入框。这块屏幕当初根本没人去匹:
         // running_program 是 None，1 Hz 看门狗在入口就早退了，于是转圈长挂。
