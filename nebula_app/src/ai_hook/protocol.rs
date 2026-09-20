@@ -61,7 +61,7 @@ pub(super) fn parse_envelope(bytes: &[u8]) -> Option<AiHookEvent> {
     // 写法，把它的 session id 当成 claude 的，就会把一个不存在的会话交给
     // `claude --resume`（见 nebula_hook 的 FOREIGN_HOOK_RUNNERS 注释）。
     let session_id_keys: &[&str] = match source.as_str() {
-        "claude" => &["session_id"],
+        "claude" | "kimi" => &["session_id"],
         "codex" if native_codex => &["session_id"],
         "codex" => &["thread-id"],
         // opencode/pi 由我们自己的 bridge 规范化成 snake_case；camelCase 是
@@ -150,6 +150,18 @@ pub(super) fn parse_envelope(bytes: &[u8]) -> Option<AiHookEvent> {
             ),
             _ => return None,
         },
+        // Kimi's explicit waiting and result events share the pane lifecycle.
+        // Heartbeats and background notifications never request user input.
+        "kimi" => match payload.get("hook_event_name").and_then(Value::as_str) {
+            Some("SessionStart") => (AiHookKind::SessionStart, None),
+            Some("UserPromptSubmit") => (AiHookKind::PromptSubmit, None),
+            Some("Stop") | Some("Interrupt") => (AiHookKind::TurnDone, None),
+            Some("StopFailure") => (AiHookKind::TurnDone, context_string(&payload, &["error"])),
+            Some("PermissionRequest") => (AiHookKind::NeedsAttention, attention_message(&payload)),
+            Some("PermissionResult") => (AiHookKind::ToolComplete, None),
+            Some("SessionEnd") => (AiHookKind::SessionEnd, None),
+            _ => return None,
+        },
         // opencode's Bun plugin normalizes its event bus into a tiny
         // `{"kind":"prompt|done|attention","message":?}` payload (see the
         // embedded plugin in `ensure_opencode_plugin`), so this side stays
@@ -168,7 +180,14 @@ pub(super) fn parse_envelope(bytes: &[u8]) -> Option<AiHookEvent> {
     if source == "codex" && kind == AiHookKind::TurnDone && event_id.is_none() {
         event_id = turn_id.as_ref().map(|id| format!("codex:turn:{id}:done"));
     }
-    let turn_outcome = if native_codex
+    let turn_outcome = if source == "kimi" && kind == AiHookKind::TurnDone {
+        match payload.get("hook_event_name").and_then(Value::as_str) {
+            Some("Stop") => AiTurnOutcome::Succeeded,
+            Some("Interrupt") => AiTurnOutcome::Cancelled,
+            Some("StopFailure") => AiTurnOutcome::Failed,
+            _ => AiTurnOutcome::Unknown,
+        }
+    } else if native_codex
         && payload.get("hook_event_name").and_then(Value::as_str) == Some("Interrupt")
     {
         AiTurnOutcome::Cancelled

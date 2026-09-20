@@ -218,3 +218,30 @@ fn compaction_does_not_mark_an_active_turn_idle_and_native_stop_supplies_the_ans
     );
     assert_eq!(done.answer.unwrap().source().unwrap().as_ref(), "complete answer");
 }
+
+#[test]
+fn kimi_failure_and_interrupt_do_not_announce_success() {
+    for (event_name, expected) in [
+        ("Stop", AiTurnOutcome::Succeeded),
+        ("StopFailure", AiTurnOutcome::Failed),
+        ("Interrupt", AiTurnOutcome::Cancelled),
+    ] {
+        let raw = format!(
+            "nebula-hook/1 source=kimi pane=3\n{}",
+            json!({"hook_event_name":event_name, "session_id":"kimi-1", "error":"rate_limit"})
+        );
+        let event = parse_remote_envelope(raw.as_bytes(), Some(3)).unwrap();
+        assert_eq!(event.turn_outcome, expected);
+        let notification =
+            crate::notify::Notification::from_ai_hook(&event, event.message.clone(), false);
+        match expected {
+            AiTurnOutcome::Succeeded => assert!(!notification.unwrap().is_failure()),
+            AiTurnOutcome::Failed => {
+                assert!(notification.unwrap().is_failure());
+                assert_eq!(event.message.as_deref(), Some("rate_limit"));
+            },
+            AiTurnOutcome::Cancelled => assert!(notification.is_none()),
+            _ => unreachable!(),
+        }
+    }
+}
