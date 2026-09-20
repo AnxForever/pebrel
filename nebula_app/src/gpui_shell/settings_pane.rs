@@ -58,6 +58,7 @@ mod keymap;
 mod launcher_actions;
 mod localization;
 mod navigation;
+mod notifications;
 mod shell_picker;
 #[cfg(all(test, feature = "gpui-test-support"))]
 mod shell_picker_tests;
@@ -738,6 +739,7 @@ impl SettingsPane {
             "powerline" => flag!(powerline),
             "ghost" => flag!(ghost),
             "ai_toasts" => flag!(ai_toasts),
+            "notification_duration" => pick!(notification_duration),
             "cjk_bold_regular" => flag!(cjk_bold_regular),
             "fetch" => flag!(fetch),
             "keep_session" => flag!(keep_session),
@@ -1090,6 +1092,12 @@ impl SettingsPane {
                 language.text(crate::i18n::Message::SettingsNotificationsAiMessages),
                 help("ai_toasts", language),
                 self.runtime.ai_toasts,
+                cx,
+            ))
+            .child(self.select_row(
+                "notification_duration",
+                language.text(crate::i18n::Message::SettingsNotificationsDuration),
+                help("notification_duration", language),
                 cx,
             ))
             .child(self.select_row(
