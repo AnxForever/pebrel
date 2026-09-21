@@ -514,3 +514,34 @@ fn file_only_recovery_requires_the_provider_to_confirm_that_file() {
         ..saved
     }));
 }
+
+#[gpui::test]
+fn cold_resume_preserves_codex_id_with_a_legacy_native_file(cx: &mut TestAppContext) {
+    let (view, window, receiver) = open(cx);
+    view.update(window, |view, cx| {
+        let event = crate::ai_hook::parse_remote_envelope(
+            b"nebula-hook/1 source=codex codex_hooks=full\n{\"hook_event_name\":\"SessionStart\",\"session_id\":\"saved-thread\",\"session_file\":\"/sessions/conversation.jsonl\"}",
+            Some(view.pane_id),
+        ).unwrap();
+        let reported = crate::session::AgentSession {
+            source: event.source,
+            session_id: event.session_id,
+            session_file: event.session_file,
+        };
+        let saved = serde_json::from_str::<crate::session::AgentSession>(
+            &serde_json::to_string(&reported).unwrap(),
+        ).unwrap();
+        view.restore_agent(saved.clone(), cx);
+        assert_eq!(view.session_agent(), Some(saved.clone()));
+        assert!(view.pending_shell_command.is_some());
+        assert!(!view.can_retry_recovery(), "a known ID must not become a failed restore");
+        assert!(!receiver.try_iter().any(|message| matches!(message, Msg::Input(_))));
+        feed(view, b"\x1b]133;A\x07user@host:~$ ");
+        view.flush_pending_shell_command(cx);
+        assert!(receiver.try_iter().any(|message| {
+            matches!(message, Msg::Input(bytes) if bytes.as_ref() == b"codex resume saved-thread")
+        }));
+        assert_eq!(view.session_agent(), Some(saved));
+        assert!(view.recovery_pending(), "submission still waits for provider confirmation");
+    });
+}

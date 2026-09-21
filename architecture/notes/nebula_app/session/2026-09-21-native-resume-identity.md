@@ -30,6 +30,11 @@ Retain that path in the existing optional snapshot field; the format version
 stays unchanged. Older payloads without `transcript_path` keep their compatibility
 behavior. Explicit null/invalid transcripts do not manufacture a resumable ID.
 
+For a saved snapshot, a recognized rollout path takes precedence over its old
+ID. An unrecognized filename retains the existing ID, which still passes through
+the ordinary resume-command validator. Optional file metadata must not erase a
+previously usable target or prevent an older snapshot from resuming.
+
 Share rollout UUID parsing between Hook normalization, native-file discovery,
 the active-process probe and saved-target normalization. Parse Windows and POSIX
 paths lexically: a guest path must not be searched on the host filesystem.

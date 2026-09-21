@@ -107,9 +107,9 @@ impl AgentSession {
     pub fn resume_command(&self) -> Option<String> {
         let agent = crate::ai_agents::AgentKind::parse(&self.source)?;
         if agent == crate::ai_agents::AgentKind::Codex
-            && let Some(path) = &self.session_file
+            && let Some(id) = self.session_file.as_deref().and_then(codex_rollout_id)
         {
-            return agent.resume_command(codex_rollout_id(path)?);
+            return agent.resume_command(id);
         }
         match self.session_id.as_deref() {
             Some(id) if agent == crate::ai_agents::AgentKind::Pi && id.starts_with("pid-") => None,
