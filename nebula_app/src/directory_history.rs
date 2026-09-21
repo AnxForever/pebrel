@@ -157,7 +157,7 @@ impl DirectoryHistory {
         }
     }
 
-    /// Record a directory only after the shell reports it as the active cwd.
+    /// Record a directory confirmed by local terminal startup or cwd reporting.
     pub(crate) fn record(&self, path: &str) -> bool {
         let Some(observation) = observation(path, current_time()) else { return false };
         let mut state = self.state.lock();
