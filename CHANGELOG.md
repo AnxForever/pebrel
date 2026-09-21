@@ -18,6 +18,9 @@ Every release entry is provided in English and Simplified Chinese.
 #### Fixed
 
 - Fixed Codex cold restoration using a Hook group identifier instead of the native conversation identity. Saved sessions with an older or unrecognized transcript filename retain their existing valid conversation ID.
+- Windows local Codex sessions can recover their exact conversation ID and native path from the running process, including when a Hook identity is missing. Later lifecycle-only events retain the verified identity.
+- When Codex reports a missing saved conversation, recovery opens its native chooser, including from CMD. Failed restores also offer an explicit conversation choice in the tab menu.
+- Closing with unavailable AI session identities now offers saving known state and exiting; save failures and changed editor drafts still keep the application open.
 - Fixed file-editor selections and search matches blending into light and dark backgrounds. Ordinary text/code files now reveal the configured workspace background image, and the caret row follows the active theme.
 - Fixed copying the terminal working directory: menu and command-palette actions copy the directory reported by the shell, including guest paths, while normal selection copying retains the original text.
 - Fixed AI failure and cancellation events being presented as successful completion; Pi retry-aware outcomes and Claude failure events use the shared notification result handling.
@@ -35,6 +38,9 @@ Every release entry is provided in English and Simplified Chinese.
 - Made notification duration configurable and preserved the selected duration when replacing a pane's result.
 - Reduced repeated Git/SVN drawer work by reusing repository snapshots and rendering visible rows.
 - Improved settings search, SSH connection cards and terminal file-link opening.
+- Made cloud-storage configuration compact, bounded provider and credential fields, and aligned file-panel controls.
+- Updated command-group navigation, ordering and add actions.
+- Added settings for enabling each supported Agent integration while retaining other managed and user-owned hook entries.
 
 Windows packages include an installer and portable ZIP. Linux and macOS packages retain their Preview designation. This candidate is intended for installation testing; visual acceptance and live cold restoration with every external CLI remain separate from automated checks.
 
@@ -50,6 +56,9 @@ Windows packages include an installer and portable ZIP. Linux and macOS packages
 #### 修复
 
 - 修复 Codex 冷恢复误用 Hook 分组标识而非原生对话身份的问题。旧快照中的会话文件名无法识别时，保留原有有效对话 ID。
+- Windows 本地 Codex 会话可从正在运行的进程找回准确的对话 ID 和原生文件路径，补足 Hook 身份缺失的情况；后续仅包含生命周期信息的事件会保留已核验身份。
+- Codex 报告保存的对话不存在时，包括 CMD 在内的恢复流程可打开原生会话选择器；恢复失败后，也可从标签页菜单主动选择对话。
+- AI 会话身份暂时无法取得时，关闭操作提供保存已知状态并退出的选择；保存失败或编辑器草稿发生变化时仍保持应用打开。
 - 修复文件编辑器选区与查找命中融入浅色、深色背景的问题；普通文本和代码文件可透出已配置的工作区背景图，光标所在行跟随当前主题。
 - 修复终端工作目录复制：菜单和命令面板复制 Shell 上报的目录，包括访客环境路径；普通选区复制保留原始文字。
 - 修复 AI 失败和取消事件被显示为成功完成的问题；Pi 重试后的结果及 Claude 失败事件统一进入通知结果处理。
@@ -67,6 +76,9 @@ Windows packages include an installer and portable ZIP. Linux and macOS packages
 - 支持配置通知停留时长，并在替换窗格结果时保留选定时长。
 - 复用仓库快照、仅渲染可见行，减少 Git／SVN 抽屉的重复工作。
 - 改进设置搜索、SSH 连接卡片和终端文件链接打开。
+- 收紧云存储配置布局，限制服务选择器和凭据输入宽度，并统一文件面板控件尺寸。
+- 更新命令分组导航、排序和新增操作的布局。
+- 新增各受支持 Agent 的集成开关，安装与移除时保留其他受管理及用户已有 Hook 项。
 
 Windows 提供安装器和 ZIP 便携包，Linux 和 macOS 包继续标记为 Preview。本候选用于安装测试；视觉验收和所有外部 CLI 的实际关窗恢复仍需单独验证。
 

@@ -77,7 +77,7 @@ pub fn capabilities_for(source: &str) -> AiHookCapabilities {
             bridge_sequence: true,
             serialized_delivery: true,
         },
-        "pi" => AiHookCapabilities {
+        "pi" | "omp" => AiHookCapabilities {
             lifecycle: true,
             attention_events: false,
             attention_context: false,
@@ -95,10 +95,18 @@ pub fn capabilities_for(source: &str) -> AiHookCapabilities {
             bridge_sequence: false,
             serialized_delivery: false,
         },
-        "kimi" => AiHookCapabilities {
+        "kimi" | "copilot" | "grok" => AiHookCapabilities {
             lifecycle: true,
             attention_events: true,
             attention_context: true,
+            background_tasks: false,
+            bridge_sequence: false,
+            serialized_delivery: false,
+        },
+        "cursor" => AiHookCapabilities {
+            lifecycle: true,
+            attention_events: false,
+            attention_context: false,
             background_tasks: false,
             bridge_sequence: false,
             serialized_delivery: false,

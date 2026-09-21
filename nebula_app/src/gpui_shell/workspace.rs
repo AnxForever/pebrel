@@ -758,10 +758,11 @@ pub struct NebulaWorkspace {
     /// 用户命令管理器贴在右侧覆盖显示，不占终端布局宽度，也不复用应用动作
     /// 命令面板的状态，避免两种“命令”语义互相污染。
     command_manager_open: bool,
+    command_manager_group: Option<String>,
     command_group_menu: Option<command_manager::GroupMenu>,
     command_manager_input: Entity<InputState>,
     command_manager_selected: usize,
-    command_manager_scroll: gpui::ScrollHandle,
+    command_manager_scroll: gpui::UniformListScrollHandle,
     saved_commands: crate::saved_commands::SavedCommands,
     _command_manager_subscription: Subscription,
     /// Git/SVN 提交信息输入（GPUI 输入组件）；提交动作直达共享模型
@@ -804,6 +805,7 @@ pub struct NebulaWorkspace {
     file_tree_scroll: gpui::UniformListScrollHandle,
     /// 文件树右键：画在 workspace 根上，不进抽屉子孙树。见 `file_tree.rs`。
     file_tree_menu: Option<file_tree::FileTreeContextMenu>,
+    file_tree_path: Option<file_tree::PathEditor>,
     /// 抽屉在 SSH pane 上的远端形态。与 `side_panel` 并存而不是替换它：
     /// 用户在远端 tab 和本地 tab 之间来回切时，两边的浏览位置都该留着。
     remote_browser: remote_files::RemoteBrowser,
@@ -975,27 +977,8 @@ impl NebulaWorkspace {
                 }
             },
         );
-        let command_manager_subscription = cx.subscribe_in(
-            &command_manager_input,
-            window,
-            |this: &mut Self,
-             _: &Entity<InputState>,
-             event: &InputEvent,
-             window: &mut Window,
-             cx: &mut Context<'_, Self>| {
-                match event {
-                    InputEvent::Change => {
-                        this.command_manager_selected = 0;
-                        this.command_manager_scroll.scroll_to_item(0);
-                        cx.notify();
-                    },
-                    InputEvent::PressEnter { .. } => {
-                        this.run_selected_saved_command(window, cx);
-                    },
-                    _ => {},
-                }
-            },
-        );
+        let command_manager_subscription =
+            cx.subscribe_in(&command_manager_input, window, Self::on_command_manager_input_event);
         let file_tree_search_subscription =
             cx.subscribe_in(&file_tree_search_input, window, Self::on_file_tree_search_event);
         let sidebar_logo_target_px =
@@ -1047,10 +1030,11 @@ impl NebulaWorkspace {
             command_palette_input,
             command_palette_selected: 0,
             command_manager_open: false,
+            command_manager_group: None,
             command_group_menu: None,
             command_manager_input,
             command_manager_selected: 0,
-            command_manager_scroll: gpui::ScrollHandle::new(),
+            command_manager_scroll: gpui::UniformListScrollHandle::new(),
             saved_commands: crate::saved_commands::SavedCommands::load().unwrap_or_default(),
             _command_manager_subscription: command_manager_subscription,
             git_commit_input,
@@ -1072,6 +1056,7 @@ impl NebulaWorkspace {
             _file_tree_search_subscription: file_tree_search_subscription,
             file_tree_scroll: gpui::UniformListScrollHandle::new(),
             file_tree_menu: None,
+            file_tree_path: None,
             remote_browser: remote_files::RemoteBrowser::default(),
             remote_files_scroll: gpui::UniformListScrollHandle::new(),
             tab_menu: None,
@@ -3129,6 +3114,7 @@ impl Render for NebulaWorkspace {
             // 变化时重建，普通 render 不重复解码 PNG。
             self.sidebar_logo_images = sidebar_logo_images(sidebar_logo_target_px);
             self.sidebar_logo_target_px = sidebar_logo_target_px;
+            self.sync_settings_agent_logos(cx);
         }
         // Some tab-open/restore paths assign `active` directly. Clear a focus
         // record tied to a different entity before deriving layout booleans.

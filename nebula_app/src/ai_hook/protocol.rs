@@ -27,13 +27,14 @@ pub(super) fn parse_envelope(bytes: &[u8]) -> Option<AiHookEvent> {
     if fields.next() != Some("nebula-hook/1") {
         return None;
     }
-    let (mut source, mut pane, mut codex_mode) = (None, None, None);
+    let (mut source, mut pane, mut codex_mode, mut native_event) = (None, None, None, None);
     for field in fields {
         match field.split_once('=') {
             Some(("source", v)) => source = Some(v.to_owned()),
             Some(("pane", v)) => pane = v.parse().ok(),
             Some(("codex_hooks", "full")) => codex_mode = Some(CodexHookMode::Full),
             Some(("codex_hooks", "turns")) => codex_mode = Some(CodexHookMode::Turns),
+            Some(("event", event)) => native_event = Some(event),
             _ => (),
         }
     }
@@ -64,6 +65,8 @@ pub(super) fn parse_envelope(bytes: &[u8]) -> Option<AiHookEvent> {
         "claude" | "kimi" => &["session_id"],
         "codex" if native_codex => &["session_id"],
         "codex" => &["thread-id"],
+        "cursor" => &["conversation_id", "session_id"],
+        "copilot" | "grok" => &["sessionId"],
         // opencode/pi 由我们自己的 bridge 规范化成 snake_case；camelCase 是
         // provider SDK 原样透传时的兼容路径。
         _ => &["session_id", "sessionID", "sessionId"],
@@ -192,7 +195,7 @@ pub(super) fn parse_envelope(bytes: &[u8]) -> Option<AiHookEvent> {
         // `{"kind":"prompt|done|attention","message":?}` payload (see the
         // embedded plugin in `ensure_opencode_plugin`), so this side stays
         // decoupled from opencode's evolving SDK event schema.
-        "opencode" | "pi" => match payload.get("kind").and_then(Value::as_str) {
+        "opencode" | "pi" | "omp" => match payload.get("kind").and_then(Value::as_str) {
             Some("session-start") => (AiHookKind::SessionStart, None),
             Some("prompt") => (AiHookKind::PromptSubmit, None),
             Some("tool-complete") => (AiHookKind::ToolComplete, None),
@@ -200,6 +203,10 @@ pub(super) fn parse_envelope(bytes: &[u8]) -> Option<AiHookEvent> {
             Some("session-end") => (AiHookKind::SessionEnd, None),
             Some("attention") => (AiHookKind::NeedsAttention, attention_message(&payload)),
             _ => return None,
+        },
+        "cursor" if payload.get("hookEventName").is_some() => return None,
+        "cursor" | "copilot" | "grok" => {
+            super::native_events::parse(&source, native_event?, &payload)?
         },
         _ => return None,
     };
@@ -219,7 +226,11 @@ pub(super) fn parse_envelope(bytes: &[u8]) -> Option<AiHookEvent> {
         && payload.get("hook_event_name").and_then(Value::as_str) == Some("Interrupt")
     {
         AiTurnOutcome::Cancelled
-    } else if source == "pi" && kind == AiHookKind::TurnDone {
+    } else if matches!(source.as_str(), "cursor" | "copilot" | "grok")
+        && kind == AiHookKind::TurnDone
+    {
+        super::native_events::outcome(&source, native_event?, &payload)
+    } else if matches!(source.as_str(), "pi" | "omp") && kind == AiHookKind::TurnDone {
         match payload.get("stop_reason").and_then(Value::as_str) {
             Some("stop") => AiTurnOutcome::Succeeded,
             Some("error") => AiTurnOutcome::Failed,

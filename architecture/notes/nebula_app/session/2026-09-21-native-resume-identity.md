@@ -2,7 +2,8 @@
 
 ## Status
 
-Implemented; validation results are recorded with the change.
+Implemented; validation results are recorded with the change. Windows discovery
+and exit behavior are extended by [the open-rollout decision](2026-09-21-windows-open-rollout-and-exit.md).
 
 ## Context
 
@@ -43,6 +44,13 @@ Retain native identity fields when reducing large remote events. A matching
 acknowledgement may omit the path but cannot conflict with a saved path or ID;
 merging it retains the existing path. Incomplete targets remain available for
 retry and emit the existing localized failure notification.
+
+When a submitted Codex cold resume exits unsuccessfully and explicitly reports
+that its exact saved ID does not exist, open the native `codex resume` chooser
+once. The old target remains durable until the provider acknowledges the user's
+choice. This intentional choice can replace the ID within the same provider;
+ordinary recovery acknowledgements still reject conflicting identities. Other
+errors do not open the chooser, and a failed chooser cannot start a retry loop.
 
 ## Rejected alternatives
 

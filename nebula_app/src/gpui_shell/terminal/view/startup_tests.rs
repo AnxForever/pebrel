@@ -545,3 +545,180 @@ fn cold_resume_preserves_codex_id_with_a_legacy_native_file(cx: &mut TestAppCont
         assert!(view.recovery_pending(), "submission still waits for provider confirmation");
     });
 }
+
+fn submit_codex_restore(
+    view: &mut TerminalView,
+    receiver: &Receiver<Msg>,
+    cx: &mut Context<TerminalView>,
+) -> crate::session::AgentSession {
+    let saved = crate::session::AgentSession {
+        source: "codex".into(),
+        session_id: Some("saved-missing".into()),
+        session_file: None,
+    };
+    view.restore_agent(saved.clone(), cx);
+    feed(view, b"\x1b]133;A\x07user@host:~$ ");
+    view.flush_pending_shell_command(cx);
+    feed(view, b"codex resume saved-missing");
+    view.flush_pending_runtime_submit(cx);
+    view.process_event(Event::CommandStart, cx);
+    receiver.try_iter().for_each(drop);
+    saved
+}
+
+#[gpui::test]
+fn missing_codex_target_opens_the_native_chooser_and_confirms_the_users_choice(
+    cx: &mut TestAppContext,
+) {
+    let (view, window, receiver) = open(cx);
+    view.update(window, |view, cx| {
+        let saved = submit_codex_restore(view, &receiver, cx);
+        feed(view, b"\r\nERROR: No saved session found with ID saved-missing. Run codex resume without an ID.\r\n");
+        view.process_event(Event::CommandDone { exit_code: Some(1) }, cx);
+        assert_eq!(view.session_agent(), Some(saved));
+        assert!(view.pending_shell_command.is_some());
+        assert!(receiver.try_iter().all(|message| !matches!(message, Msg::Input(_))));
+        feed(view, b"\x1b]133;A\x07user@host:~$ ");
+        view.process_event(Event::Wakeup, cx);
+        assert!(receiver.try_iter().any(|message| {
+            matches!(message, Msg::Input(bytes) if bytes.as_ref() == b"codex resume")
+        }));
+        assert!(view.recovery_pending(), "opening a chooser is not a recovered conversation");
+        let selected = crate::session::AgentSession {
+            source: "codex".into(),
+            session_id: Some("0199a213-c2a4-7cf5-8f6b-d746fbb6e86c".into()),
+            session_file: Some("/sessions/rollout-date-0199a213-c2a4-7cf5-8f6b-d746fbb6e86c.jsonl".into()),
+        };
+        assert!(!view.recovery.accepts(&crate::session::AgentSession {
+            source: "claude".into(),
+            ..selected.clone()
+        }));
+        let event = crate::ai_hook::parse_remote_envelope(
+            b"nebula-hook/1 source=codex codex_hooks=full\n{\"hook_event_name\":\"SessionStart\",\"session_id\":\"hook-group\",\"transcript_path\":\"/sessions/rollout-date-0199a213-c2a4-7cf5-8f6b-d746fbb6e86c.jsonl\"}",
+            Some(view.pane_id),
+        ).unwrap();
+        let mut old_end = event.clone();
+        old_end.kind = crate::ai_hook::AiHookKind::SessionEnd;
+        assert!(!view.handle_ai_hook(&old_end, cx), "a delayed session end is not the user's choice");
+        let mut foreign_start = event.clone();
+        foreign_start.source = "claude".into();
+        foreign_start.session_id = None;
+        foreign_start.session_file = None;
+        assert!(!view.handle_ai_hook(&foreign_start, cx));
+        assert!(view.recovery_pending());
+        assert!(view.handle_ai_hook(&event, cx));
+        assert_eq!(view.session_agent(), Some(selected));
+        assert!(!view.recovery_pending());
+    });
+}
+
+#[gpui::test]
+fn unrelated_codex_failures_do_not_replace_the_saved_target(cx: &mut TestAppContext) {
+    for (message, exit_code) in [
+        ("ERROR: No saved session found with ID somebody-else.", Some(1)),
+        ("ERROR: network unavailable", Some(1)),
+        ("ERROR: No saved session found with ID saved-missing.", Some(0)),
+        ("ERROR: network unavailable", None),
+    ] {
+        let (view, window, receiver) = open(cx);
+        view.update(window, |view, cx| {
+            let saved = submit_codex_restore(view, &receiver, cx);
+            feed(view, format!("\r\n{message}\r\n").as_bytes());
+            view.process_event(Event::CommandDone { exit_code }, cx);
+            assert!(view.pending_shell_command.is_none(), "{message}: {exit_code:?}");
+            assert_eq!(view.session_agent(), Some(saved));
+        });
+    }
+}
+
+#[gpui::test]
+fn cmd_prompt_completion_without_exit_code_still_offers_the_missing_conversation(
+    cx: &mut TestAppContext,
+) {
+    let (view, window, receiver) = open(cx);
+    view.update(window, |view, cx| {
+        let saved = submit_codex_restore(view, &receiver, cx);
+        view.suggest.suggest_env = crate::display::SuggestEnv::Local;
+        feed(view, b"\r\nERROR: No saved session found with ID saved-missing.\r\n");
+        view.session.as_ref().unwrap().native_prompt.observe_prompt();
+        view.apply_prompt_process_probe(
+            view.command_started,
+            view.prompt_input_epoch,
+            Ok(vec![crate::process_tree::ProcessEntry {
+                pid: 1,
+                parent_pid: 0,
+                executable: "cmd.exe".into(),
+                depth: 0,
+            }]),
+            cx,
+        );
+        assert_eq!(view.session_agent(), Some(saved));
+        assert!(
+            view.pending_shell_command.is_some(),
+            "the real CMD completion route queues the chooser"
+        );
+        assert!(view.recovery_pending());
+    });
+}
+
+#[gpui::test]
+fn a_failed_restore_can_choose_a_conversation_without_recognizing_an_error_string(
+    cx: &mut TestAppContext,
+) {
+    let (view, window, receiver) = open(cx);
+    view.update(window, |view, cx| {
+        let saved = submit_codex_restore(view, &receiver, cx);
+        assert!(!view.can_choose_recovery_session(), "cannot inject a chooser into a running CLI");
+        feed(view, "\r\n未找到指定会话\r\n".as_bytes());
+        view.finish_foreground_command(None, cx);
+        assert!(view.can_choose_recovery_session());
+        view.choose_recovery_session(cx);
+        assert!(view.pending_shell_command.is_some());
+        assert_eq!(view.session_agent(), Some(saved));
+        assert!(view.recovery_pending());
+    });
+}
+
+#[gpui::test]
+fn lifecycle_only_hook_cannot_replace_a_verified_rollout_id(cx: &mut TestAppContext) {
+    let (view, window, _) = open(cx);
+    view.update(window, |view, cx| {
+        let id = "0199a213-c2a4-7cf5-8f6b-d746fbb6e86c";
+        let target = crate::session::AgentSession { source: "codex".into(), session_id: Some(id.into()),
+            session_file: Some(format!("C:/sessions/rollout-date-{id}.jsonl")) };
+        assert!(view.recovery.confirm(target.clone()));
+        view.ai_session = Some(crate::display::AiSessionIdentity { source: "codex".into(), session_id: id.into() });
+        view.ai_session_from_probe = true;
+        view.running_program = Some("codex".into());
+        view.agent_activity.begin_command(true);
+        let event = crate::ai_hook::parse_remote_envelope(
+            b"nebula-hook/1 source=codex codex_hooks=full\n{\"hook_event_name\":\"SessionStart\",\"session_id\":\"runtime-group\"}", Some(view.pane_id),
+        ).unwrap();
+        assert!(view.handle_ai_hook(&event, cx));
+        assert_eq!(view.session_agent(), Some(target));
+        assert_eq!(view.ai_session.as_ref().unwrap().session_id, id);
+    });
+}
+
+#[gpui::test]
+fn a_failed_codex_chooser_does_not_start_an_automatic_retry_loop(cx: &mut TestAppContext) {
+    let (view, window, receiver) = open(cx);
+    view.update(window, |view, cx| {
+        let saved = submit_codex_restore(view, &receiver, cx);
+        let error = b"\r\nERROR: No saved session found with ID saved-missing.\r\n";
+        feed(view, error);
+        view.process_event(Event::CommandDone { exit_code: Some(1) }, cx);
+        feed(view, b"\x1b]133;A\x07user@host:~$ ");
+        view.flush_pending_shell_command(cx);
+        feed(view, b"codex resume");
+        view.flush_pending_runtime_submit(cx);
+        view.process_event(Event::CommandStart, cx);
+        receiver.try_iter().for_each(drop);
+        feed(view, error);
+        view.process_event(Event::CommandDone { exit_code: Some(1) }, cx);
+        assert!(view.pending_shell_command.is_none());
+        assert_eq!(view.session_agent(), Some(saved));
+        assert!(view.can_retry_recovery());
+        assert!(receiver.try_iter().all(|message| !matches!(message, Msg::Input(_))));
+    });
+}

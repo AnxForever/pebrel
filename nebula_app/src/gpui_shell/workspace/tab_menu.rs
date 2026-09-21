@@ -106,10 +106,25 @@ impl NebulaWorkspace {
         let tab_count = self.tabs.len();
         let retry =
             self.tabs[ix].focused_view().filter(|view| view.read(cx).can_retry_recovery()).cloned();
+        let choose_session = self.tabs[ix]
+            .focused_view()
+            .filter(|view| view.read(cx).can_choose_recovery_session())
+            .cloned();
         let copy_cwd =
             self.tabs[ix].focused_view().map(|view| copy_working_directory_item(view, cx));
         let workspace = cx.entity().downgrade();
         let menu = PopupMenu::build(window, cx, move |mut menu, _window, _cx| {
+            if let Some(view) = choose_session {
+                menu = menu.item(
+                    PopupMenuItem::new(
+                        super::workspace_ui_language()
+                            .text(crate::i18n::Message::SessionChooseConversation),
+                    )
+                    .on_click(move |_, _, cx| {
+                        view.update(cx, |view, cx| view.choose_recovery_session(cx))
+                    }),
+                );
+            }
             if let Some(view) = retry {
                 menu = menu
                     .item(
