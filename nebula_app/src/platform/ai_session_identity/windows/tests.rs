@@ -57,14 +57,18 @@ impl Fixture {
                 "-NoProfile",
                 "-NonInteractive",
                 "-Command",
-                &format!("& $env:PEBREL_TEST_ROLLOUT_EXE --exact {HOLDER} --nocapture"),
+                &format!("& $env:PEBREL_TEST_ROLLOUT_EXE --exact {HOLDER} --nocapture | Out-Null"),
             ]);
             command
         } else {
             let mut command = Command::new("cmd.exe");
-            command
-                .args(["/d", "/s", "/c"])
-                .raw_arg(format!("\"\"{}\" --exact {HOLDER} --nocapture\"", executable.display()));
+            // The product test binary is a GUI executable. Unlike real Codex,
+            // CMD will not wait for it implicitly, so keep this shell alive
+            // explicitly until the owned stand-in exits.
+            command.args(["/d", "/s", "/c"]).raw_arg(format!(
+                "start \"\" /b /wait \"{}\" --exact {HOLDER} --nocapture",
+                executable.display()
+            ));
             command
         };
         command

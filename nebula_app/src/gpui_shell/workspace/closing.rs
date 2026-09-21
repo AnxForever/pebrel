@@ -205,7 +205,7 @@ pub(super) async fn wait_for_session_ids(
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "gpui-test-support"))]
 mod tests {
     use super::*;
     use gpui::TestAppContext;
