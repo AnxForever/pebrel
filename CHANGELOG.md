@@ -76,7 +76,7 @@ Windows 提供安装器和 ZIP 便携包，Linux 和 macOS 包继续标记为 Pr
 - **[@galact-byte](https://github.com/galact-byte)** — CMD interrupts and activity, application colors and Pi notification outcomes. / CMD 中断与活动、应用配色及 Pi 通知结果。([#206](https://github.com/Kuddev/pebrel/pull/206), [#207](https://github.com/Kuddev/pebrel/pull/207), [#208](https://github.com/Kuddev/pebrel/pull/208), [#215](https://github.com/Kuddev/pebrel/pull/215), [#216](https://github.com/Kuddev/pebrel/pull/216))
 - **[@Kuddev](https://github.com/Kuddev)** — Desktop integration, notifications, restoration and editor fixes. / 桌面集成、通知、恢复及编辑器修复。([#221](https://github.com/Kuddev/pebrel/pull/221), [#225](https://github.com/Kuddev/pebrel/pull/225), [#227](https://github.com/Kuddev/pebrel/pull/227), [#231](https://github.com/Kuddev/pebrel/pull/231))
 
-### SHA256
+**SHA256**
 
 - `Pebrel-v1.9.0-linux-x64-preview.AppImage`: `PENDING FINAL BUILD`
 - `Pebrel-v1.9.0-linux-x64-preview.deb`: `PENDING FINAL BUILD`
