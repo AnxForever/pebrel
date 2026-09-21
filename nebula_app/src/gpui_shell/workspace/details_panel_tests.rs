@@ -59,6 +59,10 @@ fn file_path_edit_navigates_and_keeps_the_last_directory_on_error_or_escape(
     std::fs::write(&path, "# Heading").unwrap();
     std::fs::create_dir(&target).unwrap();
     let process_cwd = std::env::current_dir().unwrap();
+    let select_all = match crate::platform::Platform::current() {
+        crate::platform::Platform::MacOS => "cmd-a",
+        _ => "ctrl-a",
+    };
     let (workspace, mut cx) = open(path, cx);
     workspace.update(&mut cx, |view, cx| {
         view.details_panel.section = None;
@@ -70,7 +74,7 @@ fn file_path_edit_navigates_and_keeps_the_last_directory_on_error_or_escape(
     cx.update(|window, cx| window.draw(cx).clear(cx));
     let path_button = cx.debug_bounds("file-tree-path").unwrap();
     cx.simulate_click(path_button.center(), Modifiers::default());
-    cx.simulate_keystrokes("ctrl-a");
+    cx.simulate_keystrokes(select_all);
     cx.simulate_input("中文 folder");
     cx.simulate_keystrokes("enter");
     cx.run_until_parked();
@@ -103,7 +107,7 @@ fn file_path_edit_navigates_and_keeps_the_last_directory_on_error_or_escape(
     cx.update(|window, cx| window.draw(cx).clear(cx));
     let path_button = cx.debug_bounds("file-tree-path").unwrap();
     cx.simulate_click(path_button.center(), Modifiers::default());
-    cx.simulate_keystrokes("ctrl-a");
+    cx.simulate_keystrokes(select_all);
     cx.simulate_input("missing-directory");
     cx.simulate_keystrokes("enter");
     cx.run_until_parked();
