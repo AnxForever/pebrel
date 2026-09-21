@@ -197,8 +197,9 @@ mod tests {
         executable(dir.path(), "agent");
         executable(dir.path(), "cursor");
         assert_eq!(find_executable(AgentKind::Cursor, &[dir.path().to_path_buf()]), None);
-        let cli = executable(dir.path(), "cursor-agent");
-        assert_eq!(find_executable(AgentKind::Cursor, &[dir.path().to_path_buf()]), Some(cli));
+        let cli_dir = tempfile::tempdir().unwrap();
+        let cli = executable(cli_dir.path(), "cursor-agent");
+        assert_eq!(find_executable(AgentKind::Cursor, &[cli_dir.path().to_path_buf()]), Some(cli));
     }
 
     #[test]
