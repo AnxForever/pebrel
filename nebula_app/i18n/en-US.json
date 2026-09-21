@@ -311,6 +311,8 @@
     "action": "Action",
     "update_notice": "Pebrel v{latest} is available (current v{current})",
     "copied_lines": "Copied {lines} lines to clipboard",
+    "copy_working_directory": "Copy working directory",
+    "cwd_copied": "Working directory copied",
     "paste_lines": "Paste {lines} lines?",
     "drop_paths_invalid": "Could not paste these paths. Check for special characters or drop fewer files.",
     "drop_paths_busy": "The previous dropped paths are still being converted.",

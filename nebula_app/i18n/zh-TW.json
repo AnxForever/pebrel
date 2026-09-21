@@ -171,6 +171,8 @@
     "action": "動作",
     "update_notice": "Pebrel v{latest} 已發布（目前 v{current}）",
     "copied_lines": "已複製 {lines} 行到剪貼簿",
+    "copy_working_directory": "複製工作目錄",
+    "cwd_copied": "工作目錄已複製",
     "paste_lines": "貼上 {lines} 行文字？",
     "sent_to": "已傳送至 {target}"
   },

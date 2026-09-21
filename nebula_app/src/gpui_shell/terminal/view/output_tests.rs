@@ -5,6 +5,41 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 #[gpui::test]
+fn working_directory_copy_preserves_prompt_selection_and_utf8(cx: &mut TestAppContext) {
+    let (view, window, _) = open(cx);
+    let prompt = "    ~    15:30:27  ";
+    view.update(window, |view, cx| {
+        view.process_event(TermEvent::CwdReport("/home/用户/目录 with spaces".into()), cx);
+        feed(view, prompt.as_bytes());
+        let mut term = view.session.as_ref().unwrap().term.lock();
+        term.selection = Some(Selection::new(
+            SelectionType::Lines,
+            TermPoint::new(Line(0), Column(0)),
+            Side::Left,
+        ));
+    });
+    window.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            let selected = view.session.as_ref().unwrap().term.lock().selection_to_string();
+            assert!(selected.as_deref().unwrap().contains(prompt));
+            assert!(view.copy_working_directory(window, cx));
+            assert_eq!(
+                cx.read_from_clipboard().and_then(|item| item.text()),
+                Some("/home/用户/目录 with spaces".into())
+            );
+            assert_eq!(view.session.as_ref().unwrap().term.lock().selection_to_string(), selected);
+            assert!(view.copy_selection(false, window, cx));
+            assert_eq!(cx.read_from_clipboard().and_then(|item| item.text()), selected);
+            for unavailable in ["", "~", "relative/path", "/bad\npath"] {
+                view.cwd = unavailable.into();
+                assert!(!view.copy_working_directory(window, cx));
+                assert_eq!(cx.read_from_clipboard().and_then(|item| item.text()), selected);
+            }
+        });
+    });
+}
+
+#[gpui::test]
 fn hidden_output_keeps_the_latest_grid_without_notifying_observers(cx: &mut TestAppContext) {
     let (view, window, _) = open(cx);
     window.run_until_parked();

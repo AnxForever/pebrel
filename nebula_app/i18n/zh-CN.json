@@ -311,6 +311,8 @@
     "action": "操作",
     "update_notice": "Pebrel v{latest} 已发布（当前 v{current}）",
     "copied_lines": "已复制 {lines} 行到剪贴板",
+    "copy_working_directory": "复制工作目录",
+    "cwd_copied": "工作目录已复制",
     "paste_lines": "粘贴 {lines} 行文本？",
     "drop_paths_invalid": "无法粘贴这些路径，请检查特殊字符或减少拖入的文件数量。",
     "drop_paths_busy": "上一组拖入的路径仍在转换。",
