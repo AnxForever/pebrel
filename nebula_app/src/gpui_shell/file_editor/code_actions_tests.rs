@@ -55,7 +55,10 @@ fn read_only_language_picker_changes_highlighting_without_editing_source(cx: &mu
         let picker = cx.debug_bounds("markdown-language-picker").unwrap();
         cx.simulate_click(picker.center(), Modifiers::default());
         cx.run_until_parked();
-        cx.simulate_keystrokes("ctrl-a");
+        cx.simulate_keystrokes(match crate::platform::Platform::current() {
+            crate::platform::Platform::MacOS => "cmd-a",
+            _ => "ctrl-a",
+        });
         cx.simulate_input(choice);
         cx.run_until_parked();
         press("enter", &mut cx);

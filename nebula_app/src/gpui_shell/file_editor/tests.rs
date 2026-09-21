@@ -103,17 +103,21 @@ fn returning_to_reader_keeps_source_edits_and_blocks_undo_until_source_is_open(
     std::fs::write(&path, source).unwrap();
     let (file, mut cx) = open(path, cx);
     cx.update(|window, cx| file.read(cx).focus.clone().focus(window, cx));
-    cx.simulate_keystrokes("ctrl-/ ctrl-a");
+    let modifier = match crate::platform::Platform::current() {
+        crate::platform::Platform::MacOS => "cmd",
+        _ => "ctrl",
+    };
+    cx.simulate_keystrokes(&format!("{modifier}-/ {modifier}-a"));
     cx.simulate_input("Updated");
     cx.run_until_parked();
-    cx.simulate_keystrokes("ctrl-/ ctrl-z");
+    cx.simulate_keystrokes(&format!("{modifier}-/ {modifier}-z"));
     cx.run_until_parked();
     file.read_with(&cx, |view, cx| {
         assert!(view.preview && !view.live_mode);
         assert_eq!(view.draft(cx), "Updated");
         assert!(view.dirty);
     });
-    cx.simulate_keystrokes("ctrl-/ ctrl-z");
+    cx.simulate_keystrokes(&format!("{modifier}-/ {modifier}-z"));
     cx.run_until_parked();
     assert_eq!(file.read_with(&cx, |view, cx| view.draft(cx)), source);
 }
