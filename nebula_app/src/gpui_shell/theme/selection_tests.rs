@@ -4,7 +4,7 @@ use gpui::{
     TestAppContext, Window, div, point, px,
 };
 use gpui_component::{
-    ActiveTheme as _, Root, Theme, ThemeMode, WindowExt as _,
+    ActiveTheme as _, Colorize as _, Root, Theme, ThemeMode, WindowExt as _,
     text::{TextView, TextViewState},
 };
 use nebula_settings::ThemeName;
