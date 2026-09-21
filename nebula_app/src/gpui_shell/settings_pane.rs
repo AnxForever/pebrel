@@ -1536,7 +1536,15 @@ impl Render for SettingsPane {
                                     .w_full()
                                     .flex()
                                     .justify_center()
-                                    .child(v_flex().w_full().when(application_page, |content| content.max_w(px(960.0))).child(content)),
+                                    .child(
+                                        v_flex()
+                                            .w_full()
+                                            .when(matches!(self.active_section, 9 | 10), |content| {
+                                                content.items_center()
+                                            })
+                                            .when(application_page, |content| content.max_w(px(960.0)))
+                                            .child(content),
+                                    ),
                             ),
                     ),
             )

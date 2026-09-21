@@ -3114,7 +3114,6 @@ impl Render for NebulaWorkspace {
             // 变化时重建，普通 render 不重复解码 PNG。
             self.sidebar_logo_images = sidebar_logo_images(sidebar_logo_target_px);
             self.sidebar_logo_target_px = sidebar_logo_target_px;
-            self.sync_settings_agent_logos(cx);
         }
         // Some tab-open/restore paths assign `active` directly. Clear a focus
         // record tied to a different entity before deriving layout booleans.
