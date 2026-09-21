@@ -387,3 +387,130 @@ fn different_native_session_cannot_confirm_or_erase_a_pending_resume() {
     recovery.command_ended();
     assert!(recovery.target.is_none(), "intentional exit must not resurrect the conversation");
 }
+
+#[test]
+fn native_acknowledgements_keep_known_files_when_a_bridge_omits_the_path() {
+    use super::startup_command::SessionRecovery;
+    for source in ["claude", "codex", "pi", "omp", "gemini", "opencode", "kimi"] {
+        let saved = crate::session::AgentSession {
+            source: source.into(),
+            session_id: Some("saved-conversation".into()),
+            session_file: Some("/sessions/conversation.jsonl".into()),
+        };
+        let mut recovery = SessionRecovery::default();
+        recovery.target = Some(saved.clone());
+        recovery.awaiting_confirmation = true;
+        let mut acknowledgement = saved.clone();
+        acknowledgement.session_file = Some("/sessions/unrelated.jsonl".into());
+        assert!(!recovery.confirm(acknowledgement.clone()), "{source}: conflicting file");
+        acknowledgement.session_file = None;
+        acknowledgement.session_id = Some("unrelated".into());
+        assert!(!recovery.confirm(acknowledgement.clone()), "{source}: conflicting identity");
+        acknowledgement.session_id = saved.session_id.clone();
+        assert!(recovery.confirm(acknowledgement), "{source}: native identity matches");
+        assert_eq!(recovery.target, Some(saved));
+        assert!(!recovery.awaiting_confirmation);
+    }
+}
+
+#[gpui::test]
+fn cold_resume_normalizes_codex_identity_before_waiting_for_native_confirmation(
+    cx: &mut TestAppContext,
+) {
+    let (view, window, _) = open(cx);
+    view.update(window, |view, cx| {
+        let thread = "0199a213-c2a4-7cf5-8f6b-d746fbb6e86c";
+        let path = format!(r"C:\Users\user\.codex\sessions\rollout-date-{thread}.jsonl");
+        view.restore_agent(
+            crate::session::AgentSession {
+                source: "codex".into(),
+                session_id: Some("obsolete-hook-group".into()),
+                session_file: Some(path.clone()),
+            },
+            cx,
+        );
+        let target = view.session_agent().unwrap();
+        assert_eq!(target.session_id.as_deref(), Some(thread));
+        assert_eq!(target.resume_command(), Some(format!("codex resume {thread}")));
+        let event = crate::ai_hook::parse_remote_envelope(
+            format!(
+                "nebula-hook/1 source=codex codex_hooks=full\n{}",
+                serde_json::json!({
+                    "hook_event_name": "SessionStart", "session_id": "new-runtime-group",
+                    "transcript_path": path,
+                })
+            )
+            .as_bytes(),
+            Some(view.pane_id),
+        )
+        .unwrap();
+        assert!(view.handle_ai_hook(&event, cx));
+        assert!(!view.recovery_pending());
+        assert_eq!(view.session_agent().unwrap(), target);
+    });
+}
+
+#[gpui::test]
+fn cold_resume_of_supported_clis_waits_for_the_shell_and_preserves_each_target(
+    cx: &mut TestAppContext,
+) {
+    for (source, expected) in [
+        ("claude", "claude --resume saved-conversation"),
+        ("codex", "codex resume saved-conversation"),
+        ("gemini", "gemini --resume saved-conversation"),
+        ("opencode", "opencode --session saved-conversation"),
+        ("amp", "amp threads continue saved-conversation"),
+        ("cursor", "agent --resume=saved-conversation"),
+        ("copilot", "copilot --resume saved-conversation"),
+        ("grok", "grok --resume saved-conversation"),
+        ("omp", "omp --resume saved-conversation"),
+        ("kimi", "kimi --session saved-conversation"),
+    ] {
+        let (view, window, receiver) = open(cx);
+        view.update(window, |view, cx| {
+            let saved = crate::session::AgentSession {
+                source: source.into(),
+                session_id: Some("saved-conversation".into()),
+                session_file: None,
+            };
+            view.restore_agent(saved.clone(), cx);
+            assert_eq!(view.session_agent(), Some(saved.clone()), "{source}");
+            assert!(view.ai_session.is_none(), "queuing is not a provider acknowledgement");
+            assert!(!receiver.try_iter().any(|message| matches!(message, Msg::Input(_))));
+            feed(view, b"\x1b]133;A\x07user@host:~$ ");
+            view.flush_pending_shell_command(cx);
+            assert!(
+                receiver.try_iter().any(|message| {
+                    matches!(message, Msg::Input(bytes) if bytes.as_ref() == expected.as_bytes())
+                }),
+                "{source}: exact saved conversation submitted when the prompt is ready"
+            );
+            assert_eq!(view.session_agent(), Some(saved));
+            assert!(view.recovery_pending());
+        });
+    }
+}
+
+#[test]
+fn file_only_recovery_requires_the_provider_to_confirm_that_file() {
+    use super::startup_command::SessionRecovery;
+    let saved = crate::session::AgentSession {
+        source: "pi".into(),
+        session_id: None,
+        session_file: Some("/sessions/selected.jsonl".into()),
+    };
+    let mut recovery = SessionRecovery::default();
+    recovery.target = Some(saved.clone());
+    recovery.awaiting_confirmation = true;
+    assert!(!recovery.confirm(crate::session::AgentSession {
+        source: "pi".into(),
+        session_id: Some("unrelated".into()),
+        session_file: None,
+    }));
+    assert!(recovery.awaiting_confirmation);
+    assert_eq!(recovery.target, Some(saved.clone()));
+    assert!(recovery.confirm(crate::session::AgentSession {
+        session_id: Some("selected-native-id".into()),
+        ..saved
+    }));
+}

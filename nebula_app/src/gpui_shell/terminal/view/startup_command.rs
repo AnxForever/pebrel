@@ -22,6 +22,7 @@ impl SessionRecovery {
                 expected.source != target.source
                     || (expected.session_id.is_some() && expected.session_id != target.session_id)
                     || (expected.session_file.is_some()
+                        && (target.session_file.is_some() || expected.session_id.is_none())
                         && expected.session_file != target.session_file)
             }))
     }
@@ -118,9 +119,10 @@ impl TerminalView {
 
     pub(crate) fn restore_agent(
         &mut self,
-        agent: crate::session::AgentSession,
+        mut agent: crate::session::AgentSession,
         cx: &mut Context<Self>,
     ) {
+        agent.normalize_identity();
         self.recovery = SessionRecovery {
             target: Some(agent.clone()),
             awaiting_confirmation: true,
@@ -131,6 +133,11 @@ impl TerminalView {
                 self.run_command(command, cx);
             } else {
                 self.recovery.failed = true;
+                cx.emit(TerminalViewEvent::Notification(crate::notify::Notification::Text {
+                    body: ui_language().text(crate::i18n::Message::SessionRestoreFailed).to_owned(),
+                    program: Some(agent.source),
+                }));
+                cx.notify();
             }
             return;
         }

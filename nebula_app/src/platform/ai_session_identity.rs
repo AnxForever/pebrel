@@ -179,10 +179,7 @@ fn valid_uuid(id: &str) -> bool {
 }
 
 fn rollout_id(path: &Path) -> Option<String> {
-    let stem = path.file_stem()?.to_str()?;
-    let start = stem.len().checked_sub(36)?;
-    let id = stem.get(start..)?;
-    valid_uuid(id).then(|| id.to_owned())
+    crate::session::codex_rollout_id(path.to_str()?).map(str::to_owned)
 }
 
 fn probe_wsl(

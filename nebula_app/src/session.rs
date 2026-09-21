@@ -20,7 +20,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::display::color::Rgb;
 
+mod identity;
 mod window_layout;
+pub(crate) use identity::codex_rollout_id;
 pub use window_layout::WindowLayout;
 pub(crate) use window_layout::combine_sessions;
 
@@ -104,6 +106,11 @@ impl AgentSession {
     /// `ai_sessions::AiSession::resume_command`（手动恢复面板）保持一致。
     pub fn resume_command(&self) -> Option<String> {
         let agent = crate::ai_agents::AgentKind::parse(&self.source)?;
+        if agent == crate::ai_agents::AgentKind::Codex
+            && let Some(path) = &self.session_file
+        {
+            return agent.resume_command(codex_rollout_id(path)?);
+        }
         match self.session_id.as_deref() {
             Some(id) if agent == crate::ai_agents::AgentKind::Pi && id.starts_with("pid-") => None,
             Some(id) => agent.resume_command(id),
