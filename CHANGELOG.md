@@ -27,6 +27,7 @@ Every release entry is provided in English and Simplified Chinese.
 - Fixed application 256-color blocks being overwritten by terminal prompt colors. Explicit custom color overrides remain supported.
 - Fixed SSH automatic authentication ignoring the available system agent.
 - Fixed long Markdown outline headings overlapping neighboring rows.
+- Fixed Markdown caret placement for CJK and emoji, interrupted drag selections, heading layout shifts and code-language pickers extending beyond the window.
 
 #### Improved
 
@@ -58,6 +59,7 @@ Windows packages include an installer and portable ZIP. Linux and macOS packages
 - 修复应用的 256 色块被终端提示符颜色覆盖的问题，保留明确配置的自定义颜色覆盖。
 - 修复 SSH 自动认证忽略可用系统代理的问题。
 - 修复 Markdown 目录长标题与相邻行重叠的问题。
+- 修复 Markdown 中文与 emoji 的光标落点、中断拖动后残留选区、标题编辑时布局跳动以及代码语言菜单超出窗口的问题。
 
 #### 改进
 
@@ -74,7 +76,7 @@ Windows 提供安装器和 ZIP 便携包，Linux 和 macOS 包继续标记为 Pr
 
 - **[@Traveritas](https://github.com/Traveritas)** — Kimi Code integration. / Kimi Code 集成。([#197](https://github.com/Kuddev/pebrel/pull/197))
 - **[@galact-byte](https://github.com/galact-byte)** — CMD interrupts and activity, application colors and Pi notification outcomes. / CMD 中断与活动、应用配色及 Pi 通知结果。([#206](https://github.com/Kuddev/pebrel/pull/206), [#207](https://github.com/Kuddev/pebrel/pull/207), [#208](https://github.com/Kuddev/pebrel/pull/208), [#215](https://github.com/Kuddev/pebrel/pull/215), [#216](https://github.com/Kuddev/pebrel/pull/216))
-- **[@Kuddev](https://github.com/Kuddev)** — Desktop integration, notifications, restoration and editor fixes. / 桌面集成、通知、恢复及编辑器修复。([#221](https://github.com/Kuddev/pebrel/pull/221), [#225](https://github.com/Kuddev/pebrel/pull/225), [#227](https://github.com/Kuddev/pebrel/pull/227), [#231](https://github.com/Kuddev/pebrel/pull/231))
+- **[@Kuddev](https://github.com/Kuddev)** — Desktop integration, notifications, restoration and editor fixes. / 桌面集成、通知、恢复及编辑器修复。([#221](https://github.com/Kuddev/pebrel/pull/221), [#225](https://github.com/Kuddev/pebrel/pull/225), [#227](https://github.com/Kuddev/pebrel/pull/227), [#231](https://github.com/Kuddev/pebrel/pull/231), [#232](https://github.com/Kuddev/pebrel/pull/232))
 
 **SHA256**
 
