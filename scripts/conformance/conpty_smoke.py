@@ -70,16 +70,51 @@ kernel.GetExitCodeProcess.argtypes = [wt.HANDLE, ctypes.POINTER(wt.DWORD)]
 kernel.GetExitCodeProcess.restype = wt.BOOL
 kernel.TerminateProcess.argtypes = [wt.HANDLE, wt.UINT]
 kernel.TerminateProcess.restype = wt.BOOL
+kernel.FreeConsole.argtypes = []
+kernel.FreeConsole.restype = wt.BOOL
+kernel.AttachConsole.argtypes = [wt.DWORD]
+kernel.AttachConsole.restype = wt.BOOL
+kernel.CreateFileW.argtypes = [wt.LPCWSTR, wt.DWORD, wt.DWORD, wt.LPVOID, wt.DWORD, wt.DWORD, wt.HANDLE]
+kernel.CreateFileW.restype = wt.HANDLE
+kernel.GetConsoleScreenBufferInfo.argtypes = [wt.HANDLE, wt.LPVOID]
+kernel.GetConsoleScreenBufferInfo.restype = wt.BOOL
+INVALID_HANDLE_VALUE = wt.HANDLE(-1).value
+
+
+def cursor_probe(pid: int) -> dict[str, object]:
+    """The same conhost cursor probe Pebrel runs after every resize."""
+    kernel.FreeConsole()
+    if not kernel.AttachConsole(pid):
+        return {"attach_error": ctypes.get_last_error()}
+    handle = kernel.CreateFileW("CONOUT$", 0xC0000000, 0x3, None, 3, 0, None)
+    if handle == INVALID_HANDLE_VALUE:
+        error = ctypes.get_last_error()
+        kernel.FreeConsole()
+        return {"conout_error": error}
+    info = ctypes.create_string_buffer(22)
+    ok = kernel.GetConsoleScreenBufferInfo(handle, info)
+    error = ctypes.get_last_error()
+    kernel.CloseHandle(handle)
+    kernel.FreeConsole()
+    if not ok:
+        return {"info_error": error}
+    # CONSOLE_SCREEN_BUFFER_INFO: dwSize, dwCursorPosition, wAttributes, srWindow.
+    cursor_y = int.from_bytes(info.raw[6:8], "little", signed=True)
+    top = int.from_bytes(info.raw[12:14], "little", signed=True)
+    bottom = int.from_bytes(info.raw[16:18], "little", signed=True)
+    return {"row": cursor_y - top, "rows": bottom - top + 1}
 
 CreateFn = ctypes.WINFUNCTYPE(ctypes.c_long, Coord, wt.HANDLE, wt.HANDLE, wt.DWORD, ctypes.POINTER(wt.LPVOID))
+ResizeFn = ctypes.WINFUNCTYPE(ctypes.c_long, wt.LPVOID, Coord)
 CloseFn = ctypes.WINFUNCTYPE(None, wt.LPVOID)
 
 
-def api(library: str | None) -> tuple[CreateFn, CloseFn, str]:
+def api(library: str | None) -> tuple[CreateFn, ResizeFn, CloseFn]:
     module = ctypes.WinDLL(library, use_last_error=True) if library else kernel
     create = CreateFn(("CreatePseudoConsole", module))
+    resize = ResizeFn(("ResizePseudoConsole", module))
     close = CloseFn(("ClosePseudoConsole", module))
-    return create, close, library or "kernel32"
+    return create, resize, close
 
 
 def run_case(
@@ -88,11 +123,19 @@ def run_case(
     flags: int,
     wait_seconds: float,
     done_marker: bytes = b"CONPTY_SMOKE_OK",
+    steps: tuple[str, ...] = (),
 ) -> dict[str, object]:
-    """Interactive shells never exit; the marker ends the wait once it renders."""
-    result: dict[str, object] = {"library": library or "kernel32", "command": command, "flags": flags}
+    """Interactive shells never exit; the marker ends the wait once it renders.
+
+    `steps` replays Pebrel's post-spawn sequence 30ms after the first output:
+    `resize` calls ResizePseudoConsole, `probe` attaches to the client console
+    and reads its cursor, mirroring the align-sync and align stages.
+    """
+    result: dict[str, object] = {
+        "library": library or "kernel32", "command": command, "flags": flags, "steps": list(steps),
+    }
     try:
-        create, close, _ = api(library)
+        create, resize, close = api(library)
     except OSError as error:
         result["error"] = f"load failed: {error}"
         return result
@@ -150,14 +193,28 @@ def run_case(
     deadline = time.monotonic() + wait_seconds
     first_output_ms: int | None = None
     marker_ms: int | None = None
+    steps_at: float | None = None
+    step_log: list[dict[str, object]] = []
     while time.monotonic() < deadline:
         if chunks and first_output_ms is None:
             first_output_ms = round((time.monotonic() - started) * 1000)
+            steps_at = time.monotonic() + 0.03
+        if steps and steps_at is not None and time.monotonic() >= steps_at:
+            for step in steps:
+                entry: dict[str, object] = {"step": step, "at_ms": round((time.monotonic() - started) * 1000)}
+                if step == "resize":
+                    entry["hresult"] = f"{resize(hpc, Coord(82, 25)) & 0xFFFFFFFF:#010x}"
+                elif step == "probe":
+                    entry.update(cursor_probe(process.dwProcessId))
+                entry["bytes_after"] = sum(len(chunk) for chunk in chunks)
+                step_log.append(entry)
+            steps = ()
         if marker_ms is None and done_marker in b"".join(chunks):
             marker_ms = round((time.monotonic() - started) * 1000)
             break
         if kernel.WaitForSingleObject(process.hProcess, 100) == 0:
             break
+    result["step_log"] = step_log
     result["marker_ms"] = marker_ms
     code = wt.DWORD()
     kernel.GetExitCodeProcess(process.hProcess, ctypes.byref(code))
@@ -237,11 +294,15 @@ def main() -> int:
                     b"133;A",
                 ),
             }
+            variants: list[tuple[str, ...]] = [(), ("resize",), ("probe",), ("resize", "probe", "probe")]
             for name, (command, marker) in interactive.items():
-                case = run_case(library, command, PSEUDOCONSOLE_WIN32_INPUT_MODE, args.wait, marker)
-                case["shell"] = name
-                print(json.dumps(case, ensure_ascii=False), flush=True)
-                report["cases"].append(case)
+                for steps in variants:
+                    case = run_case(
+                        library, command, PSEUDOCONSOLE_WIN32_INPUT_MODE, args.wait, marker, steps,
+                    )
+                    case["shell"] = name
+                    print(json.dumps(case, ensure_ascii=False), flush=True)
+                    report["cases"].append(case)
     if args.output:
         os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
         with open(args.output, "w", encoding="utf-8") as handle:
