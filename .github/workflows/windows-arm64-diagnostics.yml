@@ -20,7 +20,7 @@ permissions:
 env:
   # Dispatch is only available once the workflow exists on the default branch;
   # branch pushes diagnose the latest ARM64 package produced by the release run.
-  PACKAGE_RUN: ${{ inputs.package_run || '35618479129' }}
+  PACKAGE_RUN: ${{ inputs.package_run || '35686321517' }}
 
 jobs:
   diagnose:
