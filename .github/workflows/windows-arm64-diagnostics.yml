@@ -12,6 +12,7 @@ on:
     paths:
       - .github/workflows/windows-arm64-diagnostics.yml
       - scripts/conformance/conpty_smoke.py
+      - scripts/conformance/explicit_command_boot.py
 
 permissions:
   contents: read
@@ -20,7 +21,7 @@ permissions:
 env:
   # Dispatch is only available once the workflow exists on the default branch;
   # branch pushes diagnose the latest ARM64 package produced by the release run.
-  PACKAGE_RUN: ${{ inputs.package_run || '35686321517' }}
+  PACKAGE_RUN: ${{ inputs.package_run || '35687864774' }}
 
 jobs:
   diagnose:
@@ -63,25 +64,10 @@ jobs:
             "{0}: {1} machine={2:x4}" -f $name, $command.Source, $machine
           }
           python -c "import platform, sys; print(sys.version, platform.machine())"
-      - name: Conformance with the side-loaded runtime
+      - name: Explicit -e commands through the application
         if: always()
         shell: pwsh
-        run: python scripts/conformance/windows_standard_user.py scripts/conformance/run.py --app diagnostic-runtime/pebrel.exe --platform windows-aarch64 --output diagnostic-output/sideload/windows-arm64-report.json --no-platform-golden
-      - name: Conformance with the in-box ConPTY
-        if: always()
-        shell: pwsh
-        run: |
-          Copy-Item -Recurse diagnostic-runtime diagnostic-runtime-inbox
-          Remove-Item diagnostic-runtime-inbox/runtime/conpty.dll, diagnostic-runtime-inbox/runtime/OpenConsole.exe
-          python scripts/conformance/windows_standard_user.py scripts/conformance/run.py --app diagnostic-runtime-inbox/pebrel.exe --platform windows-aarch64 --output diagnostic-output/inbox/windows-arm64-report.json --no-platform-golden
-      - name: ConPTY smoke with an ordinary token
-        if: always()
-        shell: pwsh
-        run: python scripts/conformance/windows_standard_user.py scripts/conformance/conpty_smoke.py --runtime diagnostic-runtime/runtime --wait 25 --prompt-script "$env:TEMP/pebrel_prompt.ps1" --output diagnostic-output/smoke-ordinary.json
-      - name: ConPTY smoke with the runner token
-        if: always()
-        shell: pwsh
-        run: python scripts/conformance/conpty_smoke.py --runtime diagnostic-runtime/runtime --wait 25 --prompt-script "$env:TEMP/pebrel_prompt.ps1" --output diagnostic-output/smoke-runner.json
+        run: python scripts/conformance/windows_standard_user.py scripts/conformance/explicit_command_boot.py diagnostic-runtime/pebrel.exe diagnostic-output/explicit-commands.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
