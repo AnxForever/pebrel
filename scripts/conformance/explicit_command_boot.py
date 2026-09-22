@@ -193,6 +193,48 @@ if app_env is not None:
     replay("app-env-app-cwd", app_env, app_cwd)
     if control and not env_only:
         bisect(dict(os.environ), app_env)
+    if isinstance(report.get("bisect"), dict) and report["bisect"]["culprits"] == ["PSMODULEPATH"]:  # type: ignore[index]
+        # Which entry of the registry-only module path stalls PowerShell 5.1,
+        # and is the stall tied to the interactive host (PSReadLine import)?
+        runner_entries = [entry for entry in os.environ.get("PSMODULEPATH", "").split(";") if entry]
+        app_entries = [entry for entry in app_env.get("PSMODULEPATH", "").split(";") if entry]
+        windows_default = [
+            entry for entry in app_entries
+            if entry.lower().startswith((r"c:\program files\windowspowershell\modules", r"c:\windows\system32"))
+        ]
+        pwsh_entries = [entry for entry in runner_entries if entry not in app_entries]
+        variants: dict[str, tuple[list[str], list[str]]] = {
+            "app-entries": (app_entries, POWERSHELL_51),
+            "pwsh-dirs-then-app-entries": (pwsh_entries + app_entries, POWERSHELL_51),
+            "windows-default-only": (windows_default, POWERSHELL_51),
+            "windows-default-non-interactive": (
+                windows_default,
+                ["powershell.exe", "-NoLogo", "-NoProfile", "-Command", f"Write-Output {MARKER}"],
+            ),
+            "windows-default-import-psreadline-non-interactive": (
+                windows_default,
+                ["powershell.exe", "-NoLogo", "-NoProfile", "-Command", f"Import-Module PSReadLine; Write-Output {MARKER}"],
+            ),
+            "windows-default-list-psreadline-non-interactive": (
+                windows_default,
+                ["powershell.exe", "-NoLogo", "-NoProfile", "-Command",
+                 f"Get-Module -ListAvailable PSReadLine | ForEach-Object {{ $_.Version.ToString() + ' ' + $_.Path }}; Write-Output {MARKER}"],
+            ),
+        }
+        for index, entry in enumerate(app_entries):
+            variants[f"app-entries-without-{index}"] = ([e for e in app_entries if e != entry], POWERSHELL_51)
+        for name, (entries, command) in variants.items():
+            env = dict(os.environ)
+            env["PSMODULEPATH"] = ";".join(entries)
+            library = os.fspath(runtime_library) if runtime_library.is_file() else None
+            result = conpty_smoke.run_case(
+                library, subprocess.list2cmdline(command), 0, REPLAY_WAIT, done_marker=MARKER.encode(), env=env, cwd=None
+            )
+            summary = {k: result.get(k) for k in ("error", "first_output_ms", "marker_ms", "output_bytes")}
+            summary["output_head"] = str(result.get("output_head", ""))[:300]
+            summary["entries"] = entries
+            print("psmodulepath", name, "PASS" if result.get("marker_ms") is not None else "SILENT", json.dumps(summary)[:400], flush=True)
+            report.setdefault("psmodulepath_variants", {})[name] = summary  # type: ignore[index]
     if isinstance(report.get("env_diff"), dict):
         report["env_diff"] = {
             name: {side: redacted({name: value})[name] if value is not None else None for side, value in sides.items()}  # type: ignore[index]
