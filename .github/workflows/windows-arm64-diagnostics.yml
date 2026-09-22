@@ -1,0 +1,81 @@
+name: Windows ARM64 conformance diagnostics
+
+on:
+  workflow_dispatch:
+    inputs:
+      package_run:
+        description: Release run whose stable-package-windows-arm64 artifact should be diagnosed
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  diagnose:
+    runs-on: windows-11-arm
+    timeout-minutes: 20
+    env:
+      PYTHONUTF8: "1"
+      NEBULA_RESIZE_TRACE: "1"
+      NEBULA_BOOT_TRACE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/download-artifact@v4
+        with:
+          name: stable-package-windows-arm64
+          run-id: ${{ inputs.package_run }}
+          github-token: ${{ github.token }}
+          path: diagnostic-package
+      - name: Extract the portable package
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem diagnostic-package -Filter *.zip | Select-Object -First 1
+          Expand-Archive -LiteralPath $zip.FullName -DestinationPath diagnostic-runtime -Force
+          Get-ChildItem -Recurse diagnostic-runtime | Select-Object FullName, Length
+      - name: Describe the host
+        shell: pwsh
+        run: |
+          "PROCESSOR_ARCHITECTURE=$env:PROCESSOR_ARCHITECTURE"
+          [System.Runtime.InteropServices.RuntimeInformation]::OSDescription
+          [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+          whoami /groups | Select-String -Pattern 'Mandatory|Administrators'
+          foreach ($name in 'pwsh', 'powershell', 'cmd', 'python') {
+            $command = Get-Command $name -ErrorAction SilentlyContinue
+            if ($null -eq $command) { "$name: not found"; continue }
+            $bytes = [IO.File]::ReadAllBytes($command.Source)
+            $offset = [BitConverter]::ToInt32($bytes, 0x3C)
+            $machine = [BitConverter]::ToUInt16($bytes, $offset + 4)
+            "{0}: {1} machine={2:x4}" -f $name, $command.Source, $machine
+          }
+          python -c "import platform, sys; print(sys.version, platform.machine())"
+      - name: ConPTY smoke with an ordinary token
+        if: always()
+        shell: pwsh
+        run: python scripts/conformance/windows_standard_user.py scripts/conformance/conpty_smoke.py --runtime diagnostic-runtime/runtime --output diagnostic-output/smoke-ordinary.json
+      - name: ConPTY smoke with the runner token
+        if: always()
+        shell: pwsh
+        run: python scripts/conformance/conpty_smoke.py --runtime diagnostic-runtime/runtime --output diagnostic-output/smoke-runner.json
+      - name: Conformance with the side-loaded runtime
+        if: always()
+        shell: pwsh
+        run: python scripts/conformance/windows_standard_user.py scripts/conformance/run.py --app diagnostic-runtime/pebrel.exe --platform windows-aarch64 --output diagnostic-output/sideload/windows-arm64-report.json --no-platform-golden
+      - name: Conformance with the in-box ConPTY
+        if: always()
+        shell: pwsh
+        run: |
+          Copy-Item -Recurse diagnostic-runtime diagnostic-runtime-inbox
+          Remove-Item diagnostic-runtime-inbox/runtime/conpty.dll, diagnostic-runtime-inbox/runtime/OpenConsole.exe
+          python scripts/conformance/windows_standard_user.py scripts/conformance/run.py --app diagnostic-runtime-inbox/pebrel.exe --platform windows-aarch64 --output diagnostic-output/inbox/windows-arm64-report.json --no-platform-golden
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-arm64-conformance-diagnostics
+          path: diagnostic-output
+          if-no-files-found: warn
+          retention-days: 7
