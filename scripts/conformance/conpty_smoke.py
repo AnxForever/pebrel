@@ -82,7 +82,14 @@ def api(library: str | None) -> tuple[CreateFn, CloseFn, str]:
     return create, close, library or "kernel32"
 
 
-def run_case(library: str | None, command: str, flags: int, wait_seconds: float) -> dict[str, object]:
+def run_case(
+    library: str | None,
+    command: str,
+    flags: int,
+    wait_seconds: float,
+    done_marker: bytes = b"CONPTY_SMOKE_OK",
+) -> dict[str, object]:
+    """Interactive shells never exit; the marker ends the wait once it renders."""
     result: dict[str, object] = {"library": library or "kernel32", "command": command, "flags": flags}
     try:
         create, close, _ = api(library)
@@ -142,11 +149,16 @@ def run_case(library: str | None, command: str, flags: int, wait_seconds: float)
     thread.start()
     deadline = time.monotonic() + wait_seconds
     first_output_ms: int | None = None
+    marker_ms: int | None = None
     while time.monotonic() < deadline:
         if chunks and first_output_ms is None:
             first_output_ms = round((time.monotonic() - started) * 1000)
+        if marker_ms is None and done_marker in b"".join(chunks):
+            marker_ms = round((time.monotonic() - started) * 1000)
+            break
         if kernel.WaitForSingleObject(process.hProcess, 100) == 0:
             break
+    result["marker_ms"] = marker_ms
     code = wt.DWORD()
     kernel.GetExitCodeProcess(process.hProcess, ctypes.byref(code))
     if code.value == 259:  # STILL_ACTIVE
@@ -178,7 +190,13 @@ def main() -> int:
     parser.add_argument("--runtime", help="directory holding conpty.dll and OpenConsole.exe")
     parser.add_argument("--wait", type=float, default=15.0)
     parser.add_argument("--output")
+    parser.add_argument(
+        "--prompt-script",
+        help="also start Windows PowerShell interactively with this integration script, like Pebrel does",
+    )
     args = parser.parse_args()
+    # Terminal bytes include private-use glyphs that legacy code pages reject.
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
     shells = []
     for name in ("pwsh", "powershell", "cmd"):
@@ -204,6 +222,23 @@ def main() -> int:
         for name, path in shells:
             for flags in (PSEUDOCONSOLE_WIN32_INPUT_MODE, 0):
                 case = run_case(library, commands[name].format(path=path), flags, args.wait)
+                case["shell"] = name
+                print(json.dumps(case, ensure_ascii=False), flush=True)
+                report["cases"].append(case)
+        powershell = dict(shells).get("powershell")
+        if args.prompt_script and powershell:
+            # The prompt function emits OSC 133;A once PowerShell reaches its
+            # first interactive prompt; a bare interactive shell shows "PS ".
+            script = os.path.abspath(args.prompt_script)
+            interactive = {
+                "powershell-interactive": (f'"{powershell}" -NoLogo -NoExit', b"PS "),
+                "powershell-integration": (
+                    f'"{powershell}" -NoLogo -NoExit -ExecutionPolicy Bypass -Command ". \'{script}\'"',
+                    b"133;A",
+                ),
+            }
+            for name, (command, marker) in interactive.items():
+                case = run_case(library, command, PSEUDOCONSOLE_WIN32_INPUT_MODE, args.wait, marker)
                 case["shell"] = name
                 print(json.dumps(case, ensure_ascii=False), flush=True)
                 report["cases"].append(case)
