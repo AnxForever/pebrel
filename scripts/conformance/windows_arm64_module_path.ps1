@@ -5,7 +5,8 @@
 # rebuilds child environments from the registry (the stock console host rule), so
 # the injected entries never reach the default tab; putting them into the
 # user-level registry value keeps the rebuild faithful and PS 5.1 alive.
-# Evidence: .github/workflows/windows-arm64-diagnostics.yml bisect, 2026-09-22.
+# Evidence: environment-block replay and PSModulePath bisect on the ARM64
+# runner, 2026-09-22.
 [CmdletBinding()]
 param()
 
