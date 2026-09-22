@@ -68,22 +68,26 @@ def notes(checksum_placeholder: bool = True) -> str:
 
 
 class StableReleaseTests(unittest.TestCase):
-    def test_stable_workflow_requires_full_native_tests_before_aggregation(self) -> None:
+    def test_stable_workflow_packages_without_repeating_native_tests(self) -> None:
+        # The Full native tests workflow already covers every PR, merge group
+        # and main push; the release run only packages and verifies the runtime
+        # conformance evidence of each package, so its wall time is bounded by
+        # the slowest build rather than by test scheduling.
         root = Path(__file__).resolve().parents[2]
         workflow = (root / ".github/workflows/release.yml").read_text(encoding="utf-8")
-        native = workflow.split("  native-tests:\n", 1)[1].split("\n  linux:\n", 1)[0]
-        self.assertIn("uses: ./.github/workflows/linux-lua.yml", native)
+        self.assertNotIn("  native-tests:\n", workflow)
+        self.assertNotIn("uses: ./.github/workflows/linux-lua.yml", workflow)
         shared = (root / ".github/workflows/linux-lua.yml").read_text(encoding="utf-8")
         for platform in ("ubuntu-24.04", "windows-2022", "windows-11-arm", "macos-26", "macos-26-intel"):
             self.assertIn(platform, shared)
-        self.assertIn("workflow_call:", shared)
+        for trigger in ("pull_request:", "merge_group:", "branches: [main]"):
+            self.assertIn(trigger, shared)
         self.assertIn("run: python scripts/ci_native_tests.py", shared)
         self.assertIn("cargo check --locked --workspace --release", shared)
         self.assertIn("tools/i18n-contract/Cargo.toml", shared)
         self.assertNotIn("continue-on-error", shared)
-        self.assertNotIn("continue-on-error", native)
         aggregate = workflow.split("\n  aggregate:\n", 1)[1].split("\n  publish:\n", 1)[0]
-        self.assertIn("needs: [prepare, native-tests, linux, macos, windows, windows-arm64]", aggregate)
+        self.assertIn("needs: [prepare, linux, macos, windows, windows-arm64]", aggregate)
         self.assertIn("windows_arm64=True", aggregate)
         arm = workflow.split("\n  windows-arm64:\n", 1)[1].split("\n  aggregate:\n", 1)[0]
         for required in ("runs-on: windows-11-arm", "host: aarch64-pc-windows-msvc",
