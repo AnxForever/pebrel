@@ -225,7 +225,8 @@ def run_case(
         result["exit"] = code.value
     # The in-box host flushes trailing output while ClosePseudoConsole drains
     # the pipe; the reader thread keeps consuming during that call.
-    kernel.CloseHandle(conout_write)
+    if conout_write is not None:
+        kernel.CloseHandle(conout_write)
     close(hpc)
     thread.join(2.0)
     output = b"".join(chunks)
@@ -238,7 +239,8 @@ def run_case(
     kernel.CloseHandle(process.hProcess)
     kernel.DeleteProcThreadAttributeList(attributes)
     for handle in (conin_write, conin_read, conout_read):
-        kernel.CloseHandle(handle)
+        if handle is not None:
+            kernel.CloseHandle(handle)
     return result
 
 
@@ -294,7 +296,12 @@ def main() -> int:
                     b"133;A",
                 ),
             }
-            variants: list[tuple[str, ...]] = [(), ("resize",), ("probe",), ("resize", "probe", "probe")]
+            variants: list[tuple[str, ...]] = [
+                (),
+                ("resize", "probe", "probe"),
+                ("early_close",),
+                ("early_close", "resize", "probe", "probe"),
+            ]
             for name, (command, marker) in interactive.items():
                 for steps in variants:
                     case = run_case(

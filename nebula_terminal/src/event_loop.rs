@@ -480,6 +480,16 @@ where
             self.event_proxy.send_event(Event::Wakeup);
         }
 
+        // Boot profiling: a readable wake that carried no bytes is the
+        // signature of a lost or spurious wakeup; report only the first few.
+        if processed == 0 {
+            use std::sync::atomic::{AtomicUsize, Ordering};
+            static EMPTY_READS: AtomicUsize = AtomicUsize::new(0);
+            if EMPTY_READS.fetch_add(1, Ordering::Relaxed) < 8 {
+                crate::pty_trace("pty_read: readable wake with no bytes");
+            }
+        }
+
         Ok(processed)
     }
 
