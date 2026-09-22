@@ -7,10 +7,20 @@ on:
         description: Release run whose stable-package-windows-arm64 artifact should be diagnosed
         required: true
         type: string
+  push:
+    branches: [release/1.9.0-final]
+    paths:
+      - .github/workflows/windows-arm64-diagnostics.yml
+      - scripts/conformance/conpty_smoke.py
 
 permissions:
   contents: read
   actions: read
+
+env:
+  # Dispatch is only available once the workflow exists on the default branch;
+  # branch pushes diagnose the latest ARM64 package produced by the release run.
+  PACKAGE_RUN: ${{ inputs.package_run || '35618479129' }}
 
 jobs:
   diagnose:
@@ -28,7 +38,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: stable-package-windows-arm64
-          run-id: ${{ inputs.package_run }}
+          run-id: ${{ env.PACKAGE_RUN }}
           github-token: ${{ github.token }}
           path: diagnostic-package
       - name: Extract the portable package
