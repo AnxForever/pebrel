@@ -119,14 +119,14 @@ Windows x64 提供安装器和 ZIP 便携包，Windows ARM64 提供原生便携 
 
 **SHA256**
 
-- `Pebrel-v1.9.0-linux-x64-preview.AppImage`: `PENDING FINAL BUILD`
-- `Pebrel-v1.9.0-linux-x64-preview.deb`: `PENDING FINAL BUILD`
-- `Pebrel-v1.9.0-linux-x64-preview.tar.gz`: `PENDING FINAL BUILD`
-- `Pebrel-v1.9.0-macos-arm64-preview.dmg`: `PENDING FINAL BUILD`
-- `Pebrel-v1.9.0-macos-x64-preview.dmg`: `PENDING FINAL BUILD`
-- `Pebrel-v1.9.0-windows-x64.zip`: `PENDING FINAL BUILD`
-- `Pebrel-v1.9.0-windows-x64-setup.exe`: `PENDING FINAL BUILD`
-- `Pebrel-v1.9.0-windows-arm64.zip`: `PENDING FINAL BUILD`
+- `Pebrel-v1.9.0-linux-x64-preview.AppImage`: `4da5ea590a82ab4f89dca14df1399e7c2cd27fa4fe308da6f0e95b8aa9ae7d22`
+- `Pebrel-v1.9.0-linux-x64-preview.deb`: `bb6fff964942b750a794f2ea148e851719430dfffd9bb086a13e2f1e67d87722`
+- `Pebrel-v1.9.0-linux-x64-preview.tar.gz`: `6526ed5f2f883bb5ca9600d2685c929056fbae9f2450259f34d65093a18deda6`
+- `Pebrel-v1.9.0-macos-arm64-preview.dmg`: `daf2c6c381fbdf84c33c132e9c6c247e9f9dc6e86292cc5be855e635e6cfa6f3`
+- `Pebrel-v1.9.0-macos-x64-preview.dmg`: `9f3f1465be9e1f3489be09ccf336d5bdc0a6ae40185062f677a6e857d47e1fe0`
+- `Pebrel-v1.9.0-windows-x64.zip`: `1c219946450c7d93993394fd6d40c6e234d77547c9b4a98106c0d33ada9c27f9`
+- `Pebrel-v1.9.0-windows-x64-setup.exe`: `52cefcdae9cd98035bcdd45944c020fc9acf9c2c497147ba337ed15069a07fe6`
+- `Pebrel-v1.9.0-windows-arm64.zip`: `e2d062089afb19ddb9e3d078cc7f460a1d67cb36d95400cebab837f9fabda092`
 
 ## 1.8.2 - 2026-09-17
 
