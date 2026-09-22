@@ -596,6 +596,7 @@ jobs:
         shell: pwsh
         env:
           NEBULA_RESIZE_TRACE: "1"
+          NEBULA_BOOT_TRACE: "1"
         run: |
           python scripts/conformance/windows_standard_user.py scripts/conformance/run.py --app target/release/pebrel.exe --platform windows-aarch64 --output dist/conformance/windows-arm64-report.json
           exit $LASTEXITCODE
