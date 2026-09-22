@@ -19,6 +19,7 @@ import time
 
 PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE = 0x00020016
 EXTENDED_STARTUPINFO_PRESENT = 0x00080000
+CREATE_UNICODE_ENVIRONMENT = 0x00000400
 STARTF_USESTDHANDLES = 0x00000100
 PSEUDOCONSOLE_WIN32_INPUT_MODE = 0x4
 
@@ -124,8 +125,13 @@ def run_case(
     wait_seconds: float,
     done_marker: bytes = b"CONPTY_SMOKE_OK",
     steps: tuple[str, ...] = (),
+    env: dict[str, str] | None = None,
+    cwd: str | None = None,
 ) -> dict[str, object]:
     """Interactive shells never exit; the marker ends the wait once it renders.
+
+    `env` replaces the inherited block (CREATE_UNICODE_ENVIRONMENT) and `cwd`
+    the inherited directory, so Pebrel's own child environment can be replayed.
 
     `steps` replays Pebrel's post-spawn sequence 30ms after the first output:
     `resize` calls ResizePseudoConsole, `probe` attaches to the client console
@@ -174,8 +180,14 @@ def run_case(
     startup.lpAttributeList = ctypes.cast(attributes, wt.LPVOID)
     process = ProcessInfo()
     cmdline = ctypes.create_unicode_buffer(command)
-    if not kernel.CreateProcessW(None, cmdline, None, None, False, EXTENDED_STARTUPINFO_PRESENT,
-                                 None, None, ctypes.byref(startup), ctypes.byref(process)):
+    creation_flags = EXTENDED_STARTUPINFO_PRESENT
+    env_block = None
+    if env is not None:
+        creation_flags |= CREATE_UNICODE_ENVIRONMENT
+        block = "".join(f"{name}={value}\0" for name, value in sorted(env.items(), key=lambda item: item[0].upper()))
+        env_block = ctypes.create_unicode_buffer(block + "\0")
+    if not kernel.CreateProcessW(None, cmdline, None, None, False, creation_flags,
+                                 env_block, cwd, ctypes.byref(startup), ctypes.byref(process)):
         result["error"] = f"CreateProcessW failed: {ctypes.get_last_error()}"
         return result
     result["pid"] = process.dwProcessId
