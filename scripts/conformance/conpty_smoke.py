@@ -246,7 +246,7 @@ def run_case(
         first_output_ms = round((time.monotonic() - started) * 1000)
     result["first_output_ms"] = first_output_ms
     result["output_bytes"] = len(output)
-    result["output_head"] = output[:400].decode("utf-8", "replace")
+    result["output_head"] = output[:2000].decode("utf-8", "replace")
     kernel.CloseHandle(process.hThread)
     kernel.CloseHandle(process.hProcess)
     kernel.DeleteProcThreadAttributeList(attributes)

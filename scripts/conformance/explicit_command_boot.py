@@ -221,6 +221,11 @@ if app_env is not None:
                  f"Get-Module -ListAvailable PSReadLine | ForEach-Object {{ $_.Version.ToString() + ' ' + $_.Path }}; Write-Output {MARKER}"],
             ),
         }
+        variants["windows-default-import-utility-verbose"] = (
+            windows_default,
+            ["powershell.exe", "-NoLogo", "-NoProfile", "-Command",
+             f"Import-Module Microsoft.PowerShell.Utility -Verbose; Write-Output {MARKER}"],
+        )
         for index, entry in enumerate(app_entries):
             variants[f"app-entries-without-{index}"] = ([e for e in app_entries if e != entry], POWERSHELL_51)
         for name, (entries, command) in variants.items():
@@ -231,7 +236,7 @@ if app_env is not None:
                 library, subprocess.list2cmdline(command), 0, REPLAY_WAIT, done_marker=MARKER.encode(), env=env, cwd=None
             )
             summary = {k: result.get(k) for k in ("error", "first_output_ms", "marker_ms", "output_bytes")}
-            summary["output_head"] = str(result.get("output_head", ""))[:300]
+            summary["output_head"] = str(result.get("output_head", ""))[:1500]
             summary["entries"] = entries
             print("psmodulepath", name, "PASS" if result.get("marker_ms") is not None else "SILENT", json.dumps(summary)[:400], flush=True)
             report.setdefault("psmodulepath_variants", {})[name] = summary  # type: ignore[index]

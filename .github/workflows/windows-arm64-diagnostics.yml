@@ -13,6 +13,7 @@ on:
       - .github/workflows/windows-arm64-diagnostics.yml
       - scripts/conformance/conpty_smoke.py
       - scripts/conformance/explicit_command_boot.py
+      - scripts/conformance/windows_arm64_module_path.ps1
 
 permissions:
   contents: read
@@ -68,6 +69,18 @@ jobs:
         if: always()
         shell: pwsh
         run: python scripts/conformance/windows_standard_user.py scripts/conformance/explicit_command_boot.py diagnostic-runtime/pebrel.exe diagnostic-output/explicit-commands.json
+      - name: Apply the ARM64 image module-path workaround
+        if: always()
+        shell: pwsh
+        run: ./scripts/conformance/windows_arm64_module_path.ps1
+      - name: Explicit -e commands after the workaround
+        if: always()
+        shell: pwsh
+        run: python scripts/conformance/windows_standard_user.py scripts/conformance/explicit_command_boot.py diagnostic-runtime/pebrel.exe diagnostic-output/explicit-commands-fixed.json
+      - name: Conformance after the workaround
+        if: always()
+        shell: pwsh
+        run: python scripts/conformance/windows_standard_user.py scripts/conformance/run.py --app diagnostic-runtime/pebrel.exe --platform windows-aarch64 --output diagnostic-output/fixed/windows-arm64-report.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:

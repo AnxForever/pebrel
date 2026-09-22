@@ -592,6 +592,9 @@ jobs:
       - name: Package native ARM64 ZIP
         shell: pwsh
         run: ./scripts/package-release.ps1 -Version $env:PACKAGE_VERSION -Architecture arm64 -OutputDirectory dist -TargetDirectory target
+      - name: Keep Windows PowerShell alive on the ARM64 runner image
+        shell: pwsh
+        run: ./scripts/conformance/windows_arm64_module_path.ps1
       - name: Run ARM64 Windows conformance
         shell: pwsh
         env:
