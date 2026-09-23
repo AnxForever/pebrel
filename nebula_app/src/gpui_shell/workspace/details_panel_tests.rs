@@ -73,7 +73,6 @@ fn file_path_edit_navigates_and_keeps_the_last_directory_on_error_or_escape(
     cx.simulate_keystrokes("ctrl-a");
     cx.simulate_input("中文 folder");
     cx.simulate_keystrokes("enter");
-    cx.background_executor.run_until_parked();
     cx.run_until_parked();
     workspace.read_with(&cx, |view, _| {
         assert!(view.file_tree_path.is_none());
@@ -93,7 +92,6 @@ fn file_path_edit_navigates_and_keeps_the_last_directory_on_error_or_escape(
     cx.update(|window, cx| window.draw(cx).clear(cx));
     assert!(cx.debug_bounds("file-tree-path-editor").is_some());
     cx.simulate_keystrokes("enter");
-    cx.background_executor.run_until_parked();
     cx.run_until_parked();
     workspace.read_with(&cx, |view, _| {
         assert!(
@@ -108,7 +106,6 @@ fn file_path_edit_navigates_and_keeps_the_last_directory_on_error_or_escape(
     cx.simulate_keystrokes("ctrl-a");
     cx.simulate_input("missing-directory");
     cx.simulate_keystrokes("enter");
-    cx.background_executor.run_until_parked();
     cx.run_until_parked();
     workspace.read_with(&cx, |view, _| {
         assert!(view.file_tree_path_error().is_some());
