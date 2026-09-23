@@ -67,6 +67,30 @@ function Check-UnpreparedProcesses {
     }
 }
 
+function Wait-RuntimeHelperFiles {
+    # New helpers have a bounded lifetime, but can still be draining as the
+    # application exits. Check before setup copies any file. Old stuck helpers
+    # remain a visible failure; never terminate processes by their image name.
+    $deadline = [DateTime]::UtcNow.AddSeconds(5)
+    $helpers = @('runtime\pebrel-hook.exe', 'pebrel-hook.exe',
+        'runtime\nebula-hook.exe', 'nebula-hook.exe')
+    while ($true) {
+        $busy = $null
+        foreach ($relative in $helpers) {
+            $path = Join-Path $installation $relative
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
+            try {
+                $probe = [System.IO.FileStream]::new($path, [System.IO.FileMode]::Open,
+                    [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+                $probe.Dispose()
+            } catch { $busy = $_.Exception }
+        }
+        if (-not $busy) { return }
+        if ([DateTime]::UtcNow -ge $deadline) { throw $busy }
+        Start-Sleep -Milliseconds 100
+    }
+}
+
 try {
     if ((Get-Item -LiteralPath $PlanPath).Length -gt 1048576) { throw 'Update plan exceeds limit' }
     $plan = Get-Content -LiteralPath $PlanPath -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -133,6 +157,7 @@ try {
     Check-UnpreparedProcesses
     # No Restart Manager process-name shutdown: every participant has already
     # saved and exited. DIR reuses this validated installation without a chooser.
+    Wait-RuntimeHelperFiles
     $setupLog = Join-Path $transaction 'installer.log'
     $arguments = '/SP- /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NOCLOSEAPPLICATIONS /NORESTARTAPPLICATIONS' +
         ' /DIR="' + $installation + '" /LOG="' + $setupLog + '"'

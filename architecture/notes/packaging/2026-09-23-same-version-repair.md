@@ -23,6 +23,9 @@ Retain package SHA-256/size checks, commit authority, participant identity and
 exit waiting, installer exit-code checks, and the installed version probe.
 Remove the additional requirement that a same-version main binary change hash.
 Record the installed hash as evidence, not as a repair-success predicate.
+Before starting setup, retry exclusive write access to installed Hook helper files
+for five seconds. Short-lived forwarding can finish; persistent locks fail before
+any installation file is replaced. The helper never kills unrelated processes.
 
 ## Rejected alternatives
 
@@ -39,11 +42,13 @@ asset naming rule changes.
 
 ## Validation
 
-The native handoff suite passes ten scenarios, including a byte-identical main
+The native handoff suite passes twelve scenarios, including a byte-identical main
 binary with a repaired helper. The former same-version/no-change assertion was
 incorrect; its negative intent is retained as `upgrade-noop`, which returns
 installer success but leaves the wrong application version and must still fail.
 Cancellation, checksum/identity failures and unprepared processes remain covered.
+A released helper-file lock permits installation; a held lock must prevent setup
+from starting and recover the unchanged original application.
 
 ## Supersedes
 
