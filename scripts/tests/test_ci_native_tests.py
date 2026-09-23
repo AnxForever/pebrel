@@ -11,6 +11,24 @@ from scripts.ci_native_tests import main, native_commands
 
 
 class NativeSuiteTests(unittest.TestCase):
+    def test_packages_run_after_merge_or_manual_dispatch_not_for_prs(self):
+        root = Path(__file__).resolve().parents[2]
+        workflow = (root / ".github/workflows/preview-packages.yml").read_text()
+        events = workflow.split("\non:\n", 1)[1].split("\nconcurrency:", 1)[0]
+        triggers = set(re.findall(r"^  ([a-z_]+):", events, re.M))
+        self.assertEqual(triggers, {"push", "workflow_dispatch"})
+        push = re.search(r"^  push:(.*?)(?=^  [a-z_]+:|\Z)", events, re.M | re.S)
+        self.assertIsNotNone(push)
+        self.assertIn("branches: [main]", push.group(1))
+        self.assertIn("paths:", push.group(1))
+        # Packaging still needs explicit dispatch to create a public release.
+        self.assertIn("github.event_name == 'workflow_dispatch' && inputs.publish == true", workflow)
+        stable = (root / ".github/workflows/release.yml").read_text()
+        stable_events = stable.split("\non:\n", 1)[1].split("\nconcurrency:", 1)[0]
+        self.assertEqual(set(re.findall(r"^  ([a-z_]+):", stable_events, re.M)),
+                         {"push", "workflow_dispatch"})
+        self.assertIn('tags: ["v*.*.*"]', stable_events)
+
     def test_every_pr_and_merge_group_runs_without_path_exclusions(self):
         root = Path(__file__).resolve().parents[2]
         workflow = (root / ".github/workflows/linux-lua.yml").read_text()

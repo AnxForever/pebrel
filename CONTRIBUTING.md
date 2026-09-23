@@ -107,9 +107,11 @@ cargo check -p nebula --bin pebrel --features gpui-shell --tests --locked
 
 `Full native tests` runs on every PR and merge-group update, and on `main` pushes.
 It tests the full workspace on Linux, Windows x64 / ARM64 and both macOS
-architectures. New commits cancel obsolete PR runs. Package validation has its own
-input filters and can also be dispatched manually; a package job does not replace
-the native test suite. These triggers do not configure required status checks.
+architectures. New commits cancel obsolete PR runs. Pull requests run tests and
+compile checks without building distribution packages. Package validation runs
+after matching changes reach `main`, or by explicit manual dispatch; a package
+job does not replace the native test suite. These triggers do not configure
+required status checks.
 
 GitHub may show **Waiting for approval** for a first-time fork contributor. A
 maintainer must inspect the submitted changes and approve that workflow run from
