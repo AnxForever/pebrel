@@ -91,12 +91,10 @@ mod tests {
                     .sum();
                 std::hint::black_box((cells, segments));
             }
-            use std::io::Write as _;
-            let _ = writeln!(
-                std::io::stderr().lock(),
+            crate::gpui_shell::try_write_stderr(format_args!(
                 "{name}: 120x40 grid, {last_cells} linked columns, {:.1} us/pass (capture + dash geometry, no GPU)",
                 started.elapsed().as_secs_f64() * 1_000_000.0 / 200.0
-            );
+            ));
         }
     }
 

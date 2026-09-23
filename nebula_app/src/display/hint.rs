@@ -777,12 +777,12 @@ mod tests {
     #[test]
     fn shell_prompt_symbols_are_not_part_of_clickable_home_paths() {
         for (text, expected) in [
-            ("hello@userdk:/mnt/d/temp_build/nebula$ ", "/mnt/d/temp_build/nebula"),
+            ("alice@workstation:/mnt/d/project$ ", "/mnt/d/project"),
             ("root@host:/root# ", "/root"),
             ("user@host:/# ", "/"),
-            ("hello@userdk:~/.codex$ ", "~/.codex"),
+            ("alice@workstation:~/.codex$ ", "~/.codex"),
             ("root@host:~/work# ", "~/work"),
-            ("hello@userdk:~/工作文档$ echo test", "~/工作文档"),
+            ("alice@workstation:~/工作文档$ echo test", "~/工作文档"),
             ("~/cost$ ", "~/cost$"),
             ("~/repo# ", "~/repo#"),
             ("https://example.com/cost$ ", "https://example.com/cost$"),
