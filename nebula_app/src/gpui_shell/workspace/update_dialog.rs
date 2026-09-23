@@ -203,7 +203,7 @@ pub(crate) fn open_update_dialog(
         let latest_version: SharedString = format!("v{}", dialog_result.latest).into();
         let later_text: SharedString =
             language.text(Message::UpdateLater).into();
-        let skip_text: SharedString = language.pick("跳过此版本", "Skip this version").into();
+        let skip_text: SharedString = language.text(Message::UpdateSkipVersion).into();
         let muted = cx.theme().muted_foreground;
         let latest_color = cx.theme().warning;
         let version_background = cx.theme().muted;
@@ -360,6 +360,7 @@ pub(crate) fn open_update_dialog(
         let cancel_save_failed_prefix = save_failed_prefix.to_owned();
         let cancel_error_separator = error_separator.to_owned();
         let mut footer = DialogFooter::new()
+            .gap(px(6.0))
             .child(
                 Button::new("skip-nebula-update")
                     .label(skip_text)
