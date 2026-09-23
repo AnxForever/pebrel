@@ -95,6 +95,8 @@
     }
   },
   "common": {
+    "link_command_click": "Command+clic gauche pour ouvrir",
+    "link_ctrl_click": "Ctrl+clic gauche pour ouvrir",
     "settings": "Paramètres",
     "language": "Langue",
     "about": "À propos",

@@ -209,6 +209,8 @@
     }
   },
   "common": {
+    "link_command_click": "Command+left click to open",
+    "link_ctrl_click": "Ctrl+left click to open",
     "settings": "Settings",
     "language": "Language",
     "about": "About",

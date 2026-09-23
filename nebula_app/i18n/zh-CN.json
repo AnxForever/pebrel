@@ -209,6 +209,8 @@
     }
   },
   "common": {
+    "link_command_click": "Command+左键跳转",
+    "link_ctrl_click": "Ctrl+左键跳转",
     "settings": "设置",
     "language": "语言",
     "about": "关于",
