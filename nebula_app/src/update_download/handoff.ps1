@@ -144,9 +144,9 @@ try {
         throw 'Installed application did not report the expected version'
     }
     $installedDigest = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
-    if ($plan.version -eq $plan.original_version -and $installedDigest -eq $originalDigest) {
-        throw 'Same-version installation did not replace the application binary'
-    }
+    # A repair can replace a previously locked helper while leaving pebrel.exe
+    # byte-identical. Setup success plus the expected version is authoritative;
+    # a changed main-executable hash is not a same-version success requirement.
     Write-State 'result.json' @{
         transaction = $plan.transaction; success = $true; version = $plan.version
         executable_sha256 = $installedDigest

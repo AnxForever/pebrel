@@ -36,7 +36,7 @@ function Write-Json([string]$Path, $Value) {
 }
 
 $results = @()
-foreach ($scenario in @('cancel', 'success', 'checksum', 'creation-time', 'installer-failure', 'other-process', 'late-process', 'reinstall', 'reinstall-noop')) {
+foreach ($scenario in @('cancel', 'success', 'checksum', 'creation-time', 'installer-failure', 'other-process', 'late-process', 'reinstall', 'repair-identical', 'upgrade-noop')) {
     $directory = Join-Path $OutputRoot $scenario
     $installation = Join-Path $directory 'installed app'
     $transaction = Join-Path $directory 'transaction'
@@ -44,12 +44,12 @@ foreach ($scenario in @('cancel', 'success', 'checksum', 'creation-time', 'insta
     $null = New-Item -ItemType Directory -Path $installation, $transaction, $config -Force
     $executable = Join-Path $installation 'pebrel.exe'
     Copy-Item -LiteralPath $old -Destination $executable
-    $payload = if ($scenario -eq 'reinstall') { $reinstall } else { $candidate }
+    $payload = if ($scenario -eq 'reinstall') { $reinstall } elseif ($scenario -eq 'repair-identical') { $old } else { $candidate }
     Copy-Item -LiteralPath $payload -Destination (Join-Path $directory 'candidate.exe')
     [System.IO.File]::WriteAllText((Join-Path $installation 'unins000.exe'), 'fixture marker')
     $env:PEBREL_HANDOFF_FIXTURE = $directory
     $env:PEBREL_HANDOFF_FAIL_INSTALL = if ($scenario -eq 'installer-failure') { '1' } else { '0' }
-    $env:PEBREL_HANDOFF_NOOP_INSTALL = if ($scenario -eq 'reinstall-noop') { '1' } else { '0' }
+    $env:PEBREL_HANDOFF_NOOP_INSTALL = if ($scenario -eq 'upgrade-noop') { '1' } else { '0' }
     $parent = Start-Process -FilePath $executable -ArgumentList 'wait' -PassThru
     $null = $parent.Handle
     $runner = $null
@@ -64,7 +64,7 @@ foreach ($scenario in @('cancel', 'success', 'checksum', 'creation-time', 'insta
             participants = @(@{ pid = $parent.Id; created = $parent.StartTime.ToUniversalTime().ToFileTimeUtc().ToString() })
         }
         if ($scenario -eq 'checksum') { $plan.sha256 = '0' * 64 }
-        if ($scenario -in @('reinstall', 'reinstall-noop')) { $plan.version = '1.8.0' }
+        if ($scenario -in @('reinstall', 'repair-identical')) { $plan.version = '1.8.0' }
         if ($scenario -eq 'creation-time') { $plan.participants[0].created = '1' }
         if ($scenario -eq 'other-process') {
             $other = Start-Process -FilePath $executable -ArgumentList 'wait-other' -PassThru
@@ -105,7 +105,7 @@ foreach ($scenario in @('cancel', 'success', 'checksum', 'creation-time', 'insta
                 [System.IO.File]::WriteAllText((Join-Path $directory 'exit-parent'), 'exit')
                 Assert ($parent.WaitForExit(5000)) 'Fixture parent did not exit'
                 Wait-File $resultPath
-                if ($scenario -in @('success', 'installer-failure', 'reinstall', 'reinstall-noop')) {
+                if ($scenario -in @('success', 'installer-failure', 'reinstall', 'repair-identical', 'upgrade-noop')) {
                     Wait-File (Join-Path $directory 'new-launch')
                     $launch = [System.IO.File]::ReadAllLines((Join-Path $directory 'new-launch'))
                     Assert ($launch[0] -eq $executable) 'Relaunch selected another installation'
@@ -117,16 +117,17 @@ foreach ($scenario in @('cancel', 'success', 'checksum', 'creation-time', 'insta
         }
         Assert ($runner.WaitForExit(5000)) 'Helper did not finish'
         $result = Get-Content -LiteralPath $resultPath -Raw -Encoding UTF8 | ConvertFrom-Json
-        Assert ($result.success -eq ($scenario -in @('success', 'reinstall'))) 'Unexpected helper outcome'
+        Assert ($result.success -eq ($scenario -in @('success', 'reinstall', 'repair-identical'))) 'Unexpected helper outcome'
         if ($result.success) {
             $expected = (Get-FileHash -LiteralPath $payload -Algorithm SHA256).Hash
             Assert ($result.executable_sha256 -eq $expected) 'Installed binary differs from candidate'
+            Assert (Test-Path -LiteralPath (Join-Path $installation 'runtime\pebrel-hook.exe')) 'Successful setup did not repair the helper'
         }
         if ($scenario -in @('other-process', 'late-process')) {
             Assert (-not $other.HasExited) 'Update stopped an unprepared process'
             Assert (-not (Test-Path (Join-Path $directory 'installer-started'))) 'Setup ran with an unprepared process'
         }
-        if ($scenario -in @('installer-failure', 'reinstall-noop')) {
+        if ($scenario -in @('installer-failure', 'upgrade-noop')) {
             Assert $result.recovered_original 'Untouched old executable was not recovered'
         }
         $probe = [System.IO.FileStream]::new($plan.guard_path, [System.IO.FileMode]::OpenOrCreate,
