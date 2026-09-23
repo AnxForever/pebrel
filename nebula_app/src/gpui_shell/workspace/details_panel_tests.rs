@@ -53,6 +53,10 @@ fn width_limits_keep_room_for_the_document_without_losing_preference() {
 fn file_path_edit_navigates_and_keeps_the_last_directory_on_error_or_escape(
     cx: &mut TestAppContext,
 ) {
+    let select_all = match crate::platform::Platform::current() {
+        crate::platform::Platform::MacOS => "cmd-a",
+        _ => "ctrl-a",
+    };
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("sidebar.md");
     let target = directory.path().join("中文 folder");
