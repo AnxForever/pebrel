@@ -31,41 +31,21 @@ jobs:
     with:
       runtime_run: ${{ inputs.windows_diagnostics_run }}
 
+  # rustfmt only for now. clippy joins once the existing warning backlog is
+  # cleared; several crates deny lints, so it cannot run advisory.
   lint:
     if: ${{ inputs.windows_diagnostics_run == '' }}
-    name: lint (fmt, clippy)
+    name: lint
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    env:
-      CARGO_TERM_COLOR: always
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Install native dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends             build-essential cmake pkg-config libasound2-dev libdbus-1-dev libudev-dev             libfontconfig1-dev libfreetype6-dev libegl1-mesa-dev libgl1-mesa-dev             libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev             libx11-xcb-dev libxcb1-dev libxcb-render0-dev             libxcb-shape0-dev libxcb-xfixes0-dev libxcb-xinput-dev libxcb-xkb-dev libxi-dev
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.97.1"
-          components: rustfmt, clippy
+          components: rustfmt
       - name: rustfmt
         run: cargo fmt --all -- --check
-      - uses: ./.github/actions/rust-cache
-        id: rust-cache
-        with:
-          key: clippy
-          target: target/ci
-      - name: clippy
-        # Advisory until the existing warning backlog is cleared; then drop
-        # continue-on-error and add -D warnings.
-        continue-on-error: true
-        run: cargo clippy --locked --config .github/ci-profile.toml --profile ci --workspace --all-targets
-      - name: Save compiled workload
-        if: ${{ always() && steps.rust-cache.outcome == 'success' && steps.rust-cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v4
-        with:
-          path: target/ci
-          key: ${{ steps.rust-cache.outputs.cache-key }}
 
   # Draft pull requests run the three fast platforms (about 20 minutes) on
   # every push. The scarce runners (Intel Mac, Windows ARM64) join once the

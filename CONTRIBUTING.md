@@ -124,7 +124,7 @@ compile check into a claim that UI tests or a packaged application were run.
 
 ## Review and enforcement
 
-`architecture-contracts`, `lint (fmt, clippy)`, `pr-size`, the five
+`architecture-contracts`, `lint`, `pr-size`, the five
 `Tests (<os>)` jobs and both `Release workspace (<os>)` jobs are required checks
 on `main`, together with Code Owner approval; see the
 [activation checklist](docs/project-constraints.md#server-side-activation).

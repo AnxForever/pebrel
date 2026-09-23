@@ -20,7 +20,12 @@ class NativeSuiteTests(unittest.TestCase):
             self.assertIsNotNone(declaration)
             self.assertNotIn("paths", declaration.group(1))
             self.assertNotIn("branches", declaration.group(1))
-            self.assertNotIn("types", declaration.group(1))
+            if event == "pull_request":
+                # ready_for_review starts the scarce-runner jobs that draft
+                # pushes skip; the default activity types must stay listed.
+                self.assertIn("types: [opened, synchronize, reopened, ready_for_review]", declaration.group(1))
+            else:
+                self.assertNotIn("types", declaration.group(1))
         self.assertIn("branches: [main]", events)
         self.assertNotIn("branches-ignore", events)
         self.assertNotIn("pull_request_target", workflow)
