@@ -22,6 +22,7 @@ pub const RELEASES_PAGE: &str = "https://github.com/Kuddev/pebrel/releases";
 const UPDATE_STATE_FILE: &str = "update_state.json";
 const REMIND_LATER_SECS: u64 = 3 * 24 * 60 * 60;
 
+pub(crate) mod assets;
 mod fallback;
 
 #[cfg(feature = "update-test-source")]
@@ -333,15 +334,12 @@ fn parse_latest_release(bytes: &[u8]) -> Result<LatestRelease, String> {
         return Err("GitHub release 的版本号为空".to_owned());
     }
     let version = version.to_owned();
-    let asset = if cfg!(all(windows, target_arch = "x86_64")) {
-        select_windows_x64_installer(
-            &version,
-            release.body.as_deref().unwrap_or_default(),
-            release.assets,
-        )
-    } else {
-        None
-    };
+    let asset = assets::select(
+        &version,
+        release.body.as_deref().unwrap_or_default(),
+        &release.assets,
+        &assets::native_names(&version),
+    );
     Ok(LatestRelease { version, asset })
 }
 
@@ -358,22 +356,7 @@ fn select_windows_x64_installer(
     release_body: &str,
     assets: Vec<GitHubReleaseAsset>,
 ) -> Option<UpdateAsset> {
-    let selected = windows_x64_installer_names(version)
-        .iter()
-        .find_map(|name| assets.iter().position(|asset| asset.name == *name))?;
-    let asset = assets.into_iter().nth(selected)?;
-    let sha256 = asset
-        .digest
-        .as_deref()
-        .and_then(normalize_sha256)
-        .or_else(|| checksum_from_release_body(release_body, &asset.name));
-    Some(UpdateAsset {
-        version: version.to_owned(),
-        name: asset.name,
-        download_url: asset.browser_download_url,
-        size: (asset.size > 0).then_some(asset.size),
-        sha256,
-    })
+    assets::select(version, release_body, &assets, &windows_x64_installer_names(version))
 }
 
 fn normalize_sha256(value: &str) -> Option<String> {

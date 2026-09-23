@@ -1,6 +1,6 @@
 //! GitHub's public latest-release redirect is independent of the REST API quota.
-//! It proves a version, not an installer or checksum: fallback results only offer
-//! the official Releases page. Do not scrape HTML or invent download metadata.
+//! The redirect proves a version; the official SHA256SUMS asset can then supply
+//! verified package metadata. If absent, retain manual download only.
 
 use std::time::Duration;
 
@@ -24,8 +24,21 @@ pub(super) fn fetch_latest(status: u16) -> Result<LatestRelease, String> {
             &[("status", &status.to_string()), ("error", &error.to_string())],
         )
     })?;
-    release_from_uri(&uri)
-        .ok_or_else(|| language.text(Message::UpdateCheckUnrecognizedRelease).to_owned())
+    let mut release = release_from_uri(&uri)
+        .ok_or_else(|| language.text(Message::UpdateCheckUnrecognizedRelease).to_owned())?;
+    // The official manifest restores verified download metadata during API limits.
+    // If it is unavailable, version discovery still works with manual download.
+    let url = format!(
+        "https://github.com/Kuddev/pebrel/releases/download/v{}/SHA256SUMS",
+        release.version
+    );
+    let agent = crate::update_proxy::agent(&url, Duration::from_secs(10));
+    if let Ok(mut response) = agent.get(&url).header("User-Agent", "pebrel").call()
+        && let Ok(text) = response.body_mut().with_config().limit(64 * 1024).read_to_string()
+    {
+        release.asset = super::assets::from_checksums(&release.version, &text);
+    }
+    Ok(release)
 }
 
 fn redirected_uri(agent: &ureq::Agent, url: &str) -> Result<String, ureq::Error> {

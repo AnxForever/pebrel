@@ -780,6 +780,8 @@
     "too_large": "The background image exceeds the memory limit. Choose a smaller image."
   },
   "update": {
+    "downloading_hint": "Downloading and verifying the update package for this device.",
+    "no_verified_package": "This release has no verified update package for this device. Open the Releases page to download it manually.",
     "check_fallback_failed": "GitHub API access is restricted (HTTP {status}), and the official Releases page could not be reached: {error}. Retry later or open the Releases page.",
     "check_unrecognized_release": "The official Releases page did not identify a supported stable version. Retry later or open the Releases page.",
     "installation_failed": "Update installation failed",

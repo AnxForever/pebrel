@@ -780,6 +780,8 @@
     "too_large": "背景图超出内存限制，请选择尺寸更小的图片。"
   },
   "update": {
+    "downloading_hint": "正在后台下载并校验适用于此设备的更新安装包。",
+    "no_verified_package": "此版本没有适用于此设备的可验证安装包，请打开发布页手动下载。",
     "check_fallback_failed": "GitHub API 访问受限（HTTP {status}），备用发布页查询也失败了：{error}。请稍后重试或打开发布页。",
     "check_unrecognized_release": "官方发布页未返回可识别的稳定版本，请稍后重试或打开发布页。",
     "installation_failed": "更新安装失败",
