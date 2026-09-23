@@ -38,6 +38,7 @@ fn open(cx: &mut TestAppContext) -> (Entity<NebulaWorkspace>, VisualTestContext)
                 vec![shell("cmd"), shell("pwsh")],
                 vec![],
                 ["test-host".into()],
+                &std::collections::HashMap::new(),
                 "cmd",
                 workspace_ui_language(),
                 1.0,

@@ -557,6 +557,7 @@ fn shell_palette_puts_the_default_shell_first() {
         shells.clone(),
         Vec::new(),
         ["box.example".to_owned()],
+        &std::collections::HashMap::new(),
         "nu",
         language,
         1.0,
@@ -583,12 +584,47 @@ fn shell_palette_puts_the_default_shell_first() {
     assert_eq!(rows[4].group, "SSH 主机");
 
     // 默认 id 没在检测结果里（WSL 发行版被卸载等）：不置顶也不 panic。
-    let rows = shell_palette_rows(shells, Vec::new(), None::<String>, "wsl:Ghost", language, 1.0);
+    let rows = shell_palette_rows(shells, Vec::new(), None::<String>, &std::collections::HashMap::new(), "wsl:Ghost", language, 1.0);
     assert!(matches!(
         &rows[0].action,
         WorkspacePaletteAction::LaunchShell(shell) if shell.id == "pwsh"
     ));
     assert_eq!(rows[0].group, "所有 Shell");
+}
+
+/// 启动器 SSH 行的"主机名称"：起过名的显示别名、hint 给真实地址；没起名
+/// 回落地址本身、hint 保持 "SSH"。搜索词必须同时覆盖别名与地址。
+#[test]
+fn shell_palette_ssh_rows_show_the_configured_host_name() {
+    let labels = [("root@box.example".to_owned(), "生产机".to_owned())].into();
+    let rows = shell_palette_rows(
+        Vec::new(),
+        Vec::new(),
+        ["root@box.example".to_owned(), "plain.example".to_owned()],
+        &labels,
+        "cmd",
+        crate::display::UiLanguage::ZhCn,
+        1.0,
+    );
+    assert_eq!(rows.len(), 2);
+
+    let named = &rows[0];
+    assert_eq!(named.label, "生产机");
+    assert_eq!(named.hint, "root@box.example");
+    assert!(named.search.contains("生产机"));
+    assert!(named.search.contains("root@box.example"));
+    assert!(matches!(
+        &named.action,
+        WorkspacePaletteAction::LaunchSshHost(host) if host == "root@box.example"
+    ));
+
+    let plain = &rows[1];
+    assert_eq!(plain.label, "plain.example");
+    assert_eq!(plain.hint, "SSH");
+    assert!(matches!(
+        &plain.action,
+        WorkspacePaletteAction::LaunchSshHost(host) if host == "plain.example"
+    ));
 }
 
 /// 回归锁：新建终端弹窗里，没有品牌贴图的 shell 不能空着——必须回落到按 id
@@ -609,6 +645,7 @@ fn shell_palette_falls_back_to_an_id_glyph_when_brand_art_is_absent() {
         shells,
         Vec::new(),
         None::<String>,
+        &std::collections::HashMap::new(),
         "zsh",
         crate::display::UiLanguage::ZhCn,
         1.0,
@@ -650,6 +687,7 @@ fn shell_palette_includes_imported_terminal_profiles() {
         Vec::new(),
         vec![profile],
         None::<String>,
+        &std::collections::HashMap::new(),
         &id,
         crate::display::UiLanguage::ZhCn,
         1.0,

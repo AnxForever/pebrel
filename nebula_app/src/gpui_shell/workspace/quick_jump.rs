@@ -142,19 +142,23 @@ fn directory_rows(language: crate::display::UiLanguage) -> Vec<WorkspacePaletteR
 fn ssh_rows(language: crate::display::UiLanguage) -> Vec<WorkspacePaletteRow> {
     let group = language.pick("SSH 主机", "SSH hosts");
     let icons = ssh_host_icon_ids(&crate::display::nebula_data_dir());
+    let labels = ssh_host_labels(&crate::display::nebula_data_dir());
     crate::gpui_shell::ssh_hosts::SshHostLists::load()
         .merged()
         .into_iter()
         .map(|host| {
             let glyph =
                 crate::display::ui::os_icons::resolve(icons.get(&host).map(String::as_str)).glyph;
+            let (label, hint) =
+                super::shell_picker::ssh_host_display(labels.get(&host).map(String::as_str), &host);
+            let search = format!("{label} {host} ssh host remote 远程 连接").to_lowercase();
             WorkspacePaletteRow {
                 group_order: 3,
                 group: group.to_owned(),
-                label: host.clone(),
-                hint: "SSH".to_owned(),
+                label,
+                hint,
                 hint_style: super::WorkspacePaletteHintStyle::Metadata,
-                search: format!("{host} ssh host remote 远程 连接").to_lowercase(),
+                search,
                 action: WorkspacePaletteAction::LaunchSshHost(host),
                 icon: None,
                 icon_glyph: Some(glyph),
