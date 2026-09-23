@@ -104,6 +104,7 @@
     "new_window": "新しいウィンドウ",
     "close_tab": "タブを閉じる",
     "duplicate_tab": "タブを複製",
+    "copy_working_directory": "作業ディレクトリをコピー",
     "terminal": "ターミナル",
     "connect": "接続",
     "disconnect": "切断",
@@ -173,5 +174,15 @@
     "copied_lines": "{lines} 行をクリップボードにコピーしました",
     "paste_lines": "{lines} 行を貼り付けますか？",
     "sent_to": "{target} に送信しました"
+  },
+  "tab_menu": {
+    "fork_ai_session": "AI セッションを分岐",
+    "move_to_new_window": "新しいウィンドウに移動",
+    "export_as_workspace": "ワークスペースとしてエクスポート…",
+    "split_left_right": "左右に分割",
+    "split_top_bottom": "上下に分割",
+    "move_left": "左に移動",
+    "move_right": "右に移動",
+    "tab_color": "タブの色"
   }
 }
