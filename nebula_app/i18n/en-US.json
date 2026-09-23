@@ -780,6 +780,8 @@
     "too_large": "The background image exceeds the memory limit. Choose a smaller image."
   },
   "update": {
+    "check_fallback_failed": "GitHub API access is restricted (HTTP {status}), and the official Releases page could not be reached: {error}. Retry later or open the Releases page.",
+    "check_unrecognized_release": "The official Releases page did not identify a supported stable version. Retry later or open the Releases page.",
     "installation_failed": "Update installation failed",
     "installation_failed_hint": "The update did not complete. Your original session snapshot is retained. Review the error, recheck the package, then confirm installation again.",
     "recheck_package": "Recheck package",

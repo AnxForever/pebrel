@@ -780,6 +780,8 @@
     "too_large": "背景图超出内存限制，请选择尺寸更小的图片。"
   },
   "update": {
+    "check_fallback_failed": "GitHub API 访问受限（HTTP {status}），备用发布页查询也失败了：{error}。请稍后重试或打开发布页。",
+    "check_unrecognized_release": "官方发布页未返回可识别的稳定版本，请稍后重试或打开发布页。",
     "installation_failed": "更新安装失败",
     "installation_failed_hint": "更新未完成，原会话快照仍保留。检查错误后可重新校验安装包，再确认安装。",
     "recheck_package": "重新校验安装包",

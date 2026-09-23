@@ -173,5 +173,9 @@
     "copied_lines": "{lines}줄을 클립보드에 복사했습니다",
     "paste_lines": "{lines}줄을 붙여넣을까요?",
     "sent_to": "{target}(으)로 전송했습니다"
+  },
+  "update": {
+    "check_fallback_failed": "GitHub API 접근이 제한되었으며(HTTP {status}) 공식 릴리스 페이지에도 연결할 수 없습니다: {error}. 나중에 다시 시도하거나 릴리스 페이지를 여세요.",
+    "check_unrecognized_release": "공식 릴리스 페이지에서 지원되는 안정 버전을 확인할 수 없습니다. 나중에 다시 시도하거나 릴리스 페이지를 여세요."
   }
 }

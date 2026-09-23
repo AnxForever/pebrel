@@ -22,6 +22,8 @@ pub const RELEASES_PAGE: &str = "https://github.com/Kuddev/pebrel/releases";
 const UPDATE_STATE_FILE: &str = "update_state.json";
 const REMIND_LATER_SECS: u64 = 3 * 24 * 60 * 60;
 
+mod fallback;
+
 #[cfg(feature = "update-test-source")]
 pub(crate) mod test_source;
 
@@ -291,18 +293,34 @@ fn fetch_latest_release() -> Result<LatestRelease, String> {
         return fetch_release_with_agent(&agent, &url);
     }
     let agent = crate::update_proxy::agent(RELEASES_API, Duration::from_secs(10));
-    fetch_release_with_agent(&agent, RELEASES_API)
+    fetch_release_with_fallback(&agent, RELEASES_API, fallback::fetch_latest)
 }
 
+#[cfg(any(test, feature = "update-test-source"))]
 fn fetch_release_with_agent(agent: &ureq::Agent, url: &str) -> Result<LatestRelease, String> {
-    let bytes = agent
+    // Explicit local rehearsals must never fall back to the public network.
+    fetch_release_with_fallback(agent, url, |status| Err(format!("GitHub HTTP {status}")))
+}
+
+fn fetch_release_with_fallback(
+    agent: &ureq::Agent,
+    url: &str,
+    on_rate_limit: impl FnOnce(u16) -> Result<LatestRelease, String>,
+) -> Result<LatestRelease, String> {
+    let response = agent
         .get(url)
         .header("User-Agent", "pebrel")
         .header("Accept", "application/vnd.github+json")
-        .call()
-        .and_then(|mut response| {
-            response.body_mut().with_config().limit(2 * 1024 * 1024).read_to_vec()
-        })
+        .call();
+    let mut response = match response {
+        Err(ureq::Error::StatusCode(status @ (403 | 429))) => return on_rate_limit(status),
+        other => other.map_err(|error| format!("GitHub 请求失败：{error}"))?,
+    };
+    let bytes = response
+        .body_mut()
+        .with_config()
+        .limit(2 * 1024 * 1024)
+        .read_to_vec()
         .map_err(|error| format!("GitHub 请求失败：{error}"))?;
     parse_latest_release(&bytes)
 }
