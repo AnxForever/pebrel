@@ -74,6 +74,8 @@ raise any existing tracked private artifact for an explicit maintainer decision.
    `architecture/notes/`; ordinary fixes do not create a note.
 2. Keep one conceptual change per PR. A necessary extraction and its behavior
    tests may accompany the feature; unrelated rewrites and formatting may not.
+   The `pr-size` check fails above 1500 changed source lines (docs, lockfiles
+   and assets excluded); split instead of asking for an exemption.
 3. Put shared rules in their existing authority. UI modules adapt those rules;
    they must not fork persistence, state transitions or domain behavior.
 4. Add regression tests that fail for the defect, and test error/cancellation
@@ -122,9 +124,14 @@ compile check into a claim that UI tests or a packaged application were run.
 
 ## Review and enforcement
 
-`architecture-contracts` is the stable PR job name. Maintainers must enable it as
-a required check and require Code Owner approval in the target branch ruleset;
-see the [activation checklist](docs/project-constraints.md#server-side-activation).
+`architecture-contracts`, `lint (fmt, clippy)`, `pr-size`, the five
+`Tests (<os>)` jobs and both `Release workspace (<os>)` jobs are required checks
+on `main`, together with Code Owner approval; see the
+[activation checklist](docs/project-constraints.md#server-side-activation).
+Open pull requests as drafts while iterating: drafts run Linux, Windows x64 and
+Apple Silicon on every push (about 20 minutes). Marking the PR ready for review
+adds Intel Mac and Windows ARM64, so every merge is verified on all five
+platforms without paying for the scarce runners on each push.
 Local hooks are convenient, but bypassable; they are not the enforcement boundary.
 Submitting a workflow or `CODEOWNERS` file does not configure server-side rules.
 
@@ -137,6 +144,8 @@ feature work; there is no routine `--skip-architecture` option.
 ## 中文摘要
 
 - 先读架构图、工程合同和决策记录；按职责拆分，不按行号切片。
+- 一个 PR 只做一件事；改动超过 1500 行源码（不计文档、lockfile、资源）`pr-size` 会失败，请拆分。
+- 迭代期间用 Draft PR：每次 push 跑 Linux / Windows x64 / Apple Silicon（约 20 分钟）；标记 Ready for review 后补跑 Intel Mac 与 Windows ARM64，十项必需检查全绿才能合并。
 - 2000 行是现有仓库的防灾上限，800 行只提示审查，不是“大厂标准”。
 - 普通功能 PR 不得增加存量债务；有问题的规则可以修订，但要有反例、测试和维护者审批。
 - 新增核心抽象、依赖方向、持久化或线程模型改变要先说明设计，不强迫每个小修复写 ADR。
