@@ -17,6 +17,8 @@ SetupLogging=no
 
 [CustomMessages]
 OpenInPebrelWsl=Open in Pebrel (WSL)
+WslMenuConflict=Preserved an edited or foreign submenu: %1.
+WslMenuRegistrationFailed=Unable to register the WSL context submenu.
 
 [Code]
 #include "..\installer-migration.iss"

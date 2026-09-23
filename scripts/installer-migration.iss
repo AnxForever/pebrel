@@ -384,7 +384,7 @@ begin
   Menu := Root + '\PebrelWslMenu';
   { Never overwrite an unknown installation or an edited submenu. }
   if RegKeyExists(HKCU, Menu) and not IsOwnedWslMenu(Menu, Executable) then
-    RaiseException('An unowned or edited WSL context menu was preserved: ' + Menu);
+    RaiseException(FmtMessage(CustomMessage('WslMenuConflict'), [Menu]));
   RemoveOwnedWslContextMenusAt(Root, Executable);
   if GetArrayLength(Distros) = 0 then
     Exit;
@@ -392,7 +392,7 @@ begin
     not RegWriteStringValue(HKCU, Menu, 'Icon', Executable + ',0') or
     not RegWriteStringValue(HKCU, Menu, 'SubCommands', '') or
     not RegWriteStringValue(HKCU, Menu, 'PebrelOwner', Executable) then
-    RaiseException('Unable to register the WSL context submenu.');
+    RaiseException(CustomMessage('WslMenuRegistrationFailed'));
   for Index := 0 to GetArrayLength(Distros) - 1 do begin
     Distro := Distros[Index];
     { 键名用序号而不是发行版名：注册表键名里带空格与非 ASCII 只会给自己找麻烦，
