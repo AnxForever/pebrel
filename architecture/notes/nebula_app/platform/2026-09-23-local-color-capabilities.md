@@ -28,8 +28,8 @@ model choice and Codex version still control whether its animation runs.
 
 After refreshing a local Windows environment, fill missing `TERM` with
 `xterm-256color` and missing `COLORTERM` with `truecolor`. Preserve explicit
-case-insensitive overrides and `NO_COLOR`/`FORCE_COLOR`. Keep the actual Pebrel
-terminal identity. Existing OSC color-query and rendering paths remain authoritative.
+case-insensitive overrides and `NO_COLOR`/`FORCE_COLOR`. Forward `COLORTERM` through the existing WSL environment allowlist, preserving
+explicit forwarding flags. Keep the actual Pebrel terminal identity. Existing OSC color-query and rendering paths remain authoritative.
 
 ## Rejected alternatives
 
@@ -50,7 +50,9 @@ Hook lifetime fix is unrelated to this environment declaration.
 Eight platform-environment tests pass, including an actual child launched with
 an explicitly complete environment. VT replay preserves message surfaces and
 Braille stars for all fifteen built-in themes, plus all 225 theme-switch pairs.
-These are capability/rendering tests, not a full live Codex animation acceptance.
+A native Debian control returned no `COLORTERM` without forwarding and
+`truecolor` with it. These are capability/rendering tests, not a full live Codex
+animation acceptance.
 
 ## Supersedes
 
