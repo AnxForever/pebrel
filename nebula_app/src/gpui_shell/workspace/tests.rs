@@ -556,8 +556,7 @@ fn shell_palette_puts_the_default_shell_first() {
     let rows = shell_palette_rows(
         shells.clone(),
         Vec::new(),
-        ["box.example".to_owned()],
-        &std::collections::HashMap::new(),
+        [("box.example".to_owned(), String::new())],
         "nu",
         language,
         1.0,
@@ -584,7 +583,14 @@ fn shell_palette_puts_the_default_shell_first() {
     assert_eq!(rows[4].group, "SSH 主机");
 
     // 默认 id 没在检测结果里（WSL 发行版被卸载等）：不置顶也不 panic。
-    let rows = shell_palette_rows(shells, Vec::new(), None::<String>, &std::collections::HashMap::new(), "wsl:Ghost", language, 1.0);
+    let rows = shell_palette_rows(
+        shells,
+        Vec::new(),
+        None::<(String, String)>,
+        "wsl:Ghost",
+        language,
+        1.0,
+    );
     assert!(matches!(
         &rows[0].action,
         WorkspacePaletteAction::LaunchShell(shell) if shell.id == "pwsh"
@@ -596,12 +602,13 @@ fn shell_palette_puts_the_default_shell_first() {
 /// 回落地址本身、hint 保持 "SSH"。搜索词必须同时覆盖别名与地址。
 #[test]
 fn shell_palette_ssh_rows_show_the_configured_host_name() {
-    let labels = [("root@box.example".to_owned(), "生产机".to_owned())].into();
     let rows = shell_palette_rows(
         Vec::new(),
         Vec::new(),
-        ["root@box.example".to_owned(), "plain.example".to_owned()],
-        &labels,
+        [
+            ("root@box.example".to_owned(), "生产机".to_owned()),
+            ("plain.example".to_owned(), String::new()),
+        ],
         "cmd",
         crate::display::UiLanguage::ZhCn,
         1.0,
@@ -644,8 +651,7 @@ fn shell_palette_falls_back_to_an_id_glyph_when_brand_art_is_absent() {
     let rows = shell_palette_rows(
         shells,
         Vec::new(),
-        None::<String>,
-        &std::collections::HashMap::new(),
+        None::<(String, String)>,
         "zsh",
         crate::display::UiLanguage::ZhCn,
         1.0,
@@ -686,8 +692,7 @@ fn shell_palette_includes_imported_terminal_profiles() {
     let rows = shell_palette_rows(
         Vec::new(),
         vec![profile],
-        None::<String>,
-        &std::collections::HashMap::new(),
+        None::<(String, String)>,
         &id,
         crate::display::UiLanguage::ZhCn,
         1.0,

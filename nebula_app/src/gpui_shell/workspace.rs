@@ -636,15 +636,6 @@ fn ssh_host_icon_ids(data_dir: &Path) -> std::collections::HashMap<String, Strin
         .unwrap_or_default()
 }
 
-/// 地址 → 展示名（用户在 SSH 设置里起的"主机名称"），与 `ssh_host_icon_ids`
-/// 同一缓存策略：启动器 / Quick Jump / 命令面板在打开时各读一次，编辑保存后
-/// 由下一轮打开刷新。没起名的主机不在这里，展示端回落地址本身。
-fn ssh_host_labels(data_dir: &Path) -> std::collections::HashMap<String, String> {
-    crate::ssh_profiles::SshProfiles::load(&data_dir.join("ssh_profiles.json"))
-        .map(|profiles| profiles.labels())
-        .unwrap_or_default()
-}
-
 /// 标签的用户可编辑元数据：重命名与色标（旧壳 `TabEntry::custom_name` /
 /// `custom_color` 的对应物，字段与共享 session v4 的 `TabSession` 同名同义，
 /// 所以导出/恢复不需要转换层）。
@@ -2237,8 +2228,7 @@ impl NebulaWorkspace {
             crate::terminal_profiles::TerminalProfiles::load()
                 .map(|store| store.as_config_profiles())
                 .unwrap_or_default(),
-            crate::gpui_shell::ssh_hosts::SshHostLists::load().merged(),
-            &ssh_host_labels(&crate::display::nebula_data_dir()),
+            crate::gpui_shell::ssh_hosts::SshHostLists::load().merged_with_labels(),
             &default_shell_id,
             language,
             window.scale_factor().max(0.5),

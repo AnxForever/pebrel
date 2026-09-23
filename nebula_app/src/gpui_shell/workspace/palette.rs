@@ -99,20 +99,19 @@ impl NebulaWorkspace {
             // 启动器混排（旧壳 ⌘K 裁定）：SSH 主机与命令同列，置顶/隐藏
             // 次序由共享 merge 权威裁定。
             let ssh_icons = ssh_host_icon_ids(&crate::display::nebula_data_dir());
-            let ssh_labels = ssh_host_labels(&crate::display::nebula_data_dir());
             rows.extend(
-                crate::gpui_shell::ssh_hosts::SshHostLists::load().merged().into_iter().map(
-                    |host| {
+                crate::gpui_shell::ssh_hosts::SshHostLists::load()
+                    .merged_with_labels()
+                    .into_iter()
+                    .map(|(host, label)| {
                         let glyph = crate::display::ui::os_icons::resolve(
                             ssh_icons.get(&host).map(String::as_str),
                         )
                         .glyph;
-                        let (label, hint) = shell_picker::ssh_host_display(
-                            ssh_labels.get(&host).map(String::as_str),
-                            &host,
-                        );
-                        let search = format!("{label} {host} ssh host remote lianjie 连接")
-                            .to_lowercase();
+                        let named = (!label.is_empty()).then_some(label.as_str());
+                        let (label, hint) = shell_picker::ssh_host_display(named, &host);
+                        let search =
+                            format!("{label} {host} ssh host remote lianjie 连接").to_lowercase();
                         WorkspacePaletteRow {
                             group_order: usize::MAX,
                             group: language.pick("SSH 主机", "SSH HOSTS").to_owned(),
@@ -125,8 +124,7 @@ impl NebulaWorkspace {
                             icon_glyph: Some(glyph),
                             icon_path: None,
                         }
-                    },
-                ),
+                    }),
             );
             rows
         });

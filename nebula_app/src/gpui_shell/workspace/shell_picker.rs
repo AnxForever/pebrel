@@ -19,10 +19,7 @@ fn fallback_shell_glyph(id: &str, has_brand: bool) -> Option<char> {
 ///
 /// - 用户在 SSH 设置里起过"主机名称"：label 显示别名，hint 给真实连接地址；
 /// - 没起名：回落地址本身当 label，hint 保持 "SSH" 类型标签，避免重复。
-pub(super) fn ssh_host_display(
-    label: Option<&str>,
-    host: &str,
-) -> (String, String) {
+pub(super) fn ssh_host_display(label: Option<&str>, host: &str) -> (String, String) {
     match label {
         Some(label) if !label.trim().is_empty() => (label.trim().to_owned(), host.to_owned()),
         _ => (host.to_owned(), "SSH".to_owned()),
@@ -35,8 +32,7 @@ pub(super) fn ssh_host_display(
 pub(super) fn shell_palette_rows(
     shells: Vec<crate::shell_detect::DetectedShell>,
     profiles: Vec<crate::config::ui_config::Profile>,
-    ssh_hosts: impl IntoIterator<Item = String>,
-    ssh_labels: &std::collections::HashMap<String, String>,
+    ssh_hosts: impl IntoIterator<Item = (String, String)>,
     default_shell_id: &str,
     language: crate::display::UiLanguage,
     scale_factor: f32,
@@ -100,11 +96,12 @@ pub(super) fn shell_palette_rows(
         rows.insert(0, default_row);
     }
     let ssh_icons = ssh_host_icon_ids(&crate::display::nebula_data_dir());
-    rows.extend(ssh_hosts.into_iter().map(|host| {
+    rows.extend(ssh_hosts.into_iter().map(|(host, label)| {
         let glyph =
             crate::display::ui::os_icons::resolve(ssh_icons.get(&host).map(String::as_str)).glyph;
-        let (label, hint) =
-            ssh_host_display(ssh_labels.get(&host).map(String::as_str), &host);
+        // 空串 = 没起名：`ssh_host_display` 回落地址本身，hint 保持 "SSH"。
+        let named = (!label.is_empty()).then_some(label.as_str());
+        let (label, hint) = ssh_host_display(named, &host);
         let search = format!("{label} {host} ssh host remote lianjie 连接").to_lowercase();
         WorkspacePaletteRow {
             group_order: 2,
