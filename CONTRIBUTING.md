@@ -131,9 +131,12 @@ compile check into a claim that UI tests or a packaged application were run.
 on `main`, together with Code Owner approval; see the
 [activation checklist](docs/project-constraints.md#server-side-activation).
 Open pull requests as drafts while iterating: drafts run Linux, Windows x64 and
-Apple Silicon on every push (about 20 minutes). Marking the PR ready for review
-adds Intel Mac and Windows ARM64, so every merge is verified on all five
-platforms without paying for the scarce runners on each push.
+Apple Silicon tests plus the Apple Silicon release-profile compile check. The
+required lint job validates the event and selects the matrix before requesting
+platform runners. Drafts omit Intel Mac and Windows ARM64 jobs entirely, so their
+required contexts may be missing until the PR is marked ready. Ready PRs run the
+full matrix; every required check must succeed before merging. The ready event
+still reruns core validation rather than reusing an earlier check conclusion.
 Local hooks are convenient, but bypassable; they are not the enforcement boundary.
 Submitting a workflow or `CODEOWNERS` file does not configure server-side rules.
 
@@ -147,7 +150,7 @@ feature work; there is no routine `--skip-architecture` option.
 
 - 先读架构图、工程合同和决策记录；按职责拆分，不按行号切片。
 - 一个 PR 只做一件事；改动超过 1500 行源码（不计文档、lockfile、资源）`pr-size` 会失败，请拆分。
-- 迭代期间用 Draft PR：每次 push 跑 Linux / Windows x64 / Apple Silicon（约 20 分钟）；标记 Ready for review 后补跑 Intel Mac 与 Windows ARM64，十项必需检查全绿才能合并。
+- Draft PR 先运行必需的格式检查和矩阵规划，再创建 Linux / Windows x64 / Apple Silicon 测试及 Apple Silicon release 编译检查；不创建 Intel Mac / Windows ARM64 任务。Ready 后运行完整矩阵，十项必需检查全绿才能合并。
 - 2000 行是现有仓库的防灾上限，800 行只提示审查，不是“大厂标准”。
 - 普通功能 PR 不得增加存量债务；有问题的规则可以修订，但要有反例、测试和维护者审批。
 - 新增核心抽象、依赖方向、持久化或线程模型改变要先说明设计，不强迫每个小修复写 ADR。

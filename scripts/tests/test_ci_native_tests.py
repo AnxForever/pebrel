@@ -11,6 +11,30 @@ from scripts.ci_native_tests import main, native_commands
 
 
 class NativeSuiteTests(unittest.TestCase):
+    def test_required_lint_plans_runners_before_native_jobs(self):
+        root = Path(__file__).resolve().parents[2]
+        workflow = (root / ".github/workflows/linux-lua.yml").read_text()
+        lint = workflow.split("\n  lint:\n", 1)[1].split("\n  native-tests:\n", 1)[0]
+        self.assertIn("name: lint", lint)
+        self.assertIn("python scripts/ci_plan.py", lint)
+        self.assertIn('--event-path "$GITHUB_EVENT_PATH"', lint)
+        self.assertLess(lint.index("cargo fmt"), lint.index("python scripts/ci_plan.py"))
+        for job, output in (("native-tests", "native_matrix"),
+                            ("macos-release-check", "release_matrix")):
+            body = workflow.split(f"\n  {job}:\n", 1)[1]
+            body = re.split(r"\n  [a-z][a-z-]*:\n", body, maxsplit=1)[0]
+            self.assertIn("needs: lint", body)
+            self.assertIn(f"fromJSON(needs.lint.outputs.{output})", body)
+            self.assertNotIn("pull_request.draft", body)
+            self.assertNotIn("matrix.tier", body)
+        self.assertIn("cargo check --locked --workspace --release", workflow)
+        # Native validation never needs to retain checkout credentials.
+        checkouts = re.findall(r"- uses: actions/checkout@[^\n]+\n(.*?)(?=      - |\Z)",
+                               workflow, re.S)
+        self.assertTrue(checkouts)
+        for checkout in checkouts:
+            self.assertIn("persist-credentials: false", checkout)
+
     def test_packages_run_after_merge_or_manual_dispatch_not_for_prs(self):
         root = Path(__file__).resolve().parents[2]
         workflow = (root / ".github/workflows/preview-packages.yml").read_text()
