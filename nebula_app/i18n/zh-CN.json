@@ -237,6 +237,7 @@
     "delete": "删除",
     "edit": "编辑",
     "rename": "重命名",
+    "rename_tab": "重命名标签页",
     "copy": "复制",
     "paste": "粘贴",
     "cut": "剪切",
@@ -908,5 +909,15 @@
   "files.path_placeholder": "输入绝对路径或相对路径",
   "files.path_choose": "选择目录",
   "files.path_open": "打开目录",
-  "files.path_failed": "无法打开这个目录：{error}"
+  "files.path_failed": "无法打开这个目录：{error}",
+  "tab_menu": {
+    "fork_ai_session": "分叉 AI 会话",
+    "move_to_new_window": "移到新窗口",
+    "export_as_workspace": "导出为工作区…",
+    "split_left_right": "左右分屏",
+    "split_top_bottom": "上下分屏",
+    "move_left": "向左移动",
+    "move_right": "向右移动",
+    "tab_color": "标签颜色"
+  }
 }
