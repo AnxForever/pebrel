@@ -195,12 +195,21 @@ fn native_ssh_copy_context_menu_preview() {
                 }
                 *result.lock().unwrap() = Some(opened);
 
-                drop(pane);
-                let _ = cx.update_window(handle.into(), |_, window, _| {
-                    window.refresh();
+                let _ = cx.update_window(handle.into(), |_, window, cx| {
+                    pane.update(cx, |pane, cx| pane.close_ssh_editor(window, cx));
+                    window.dispatch_event(
+                        gpui::PlatformInput::MouseDown(gpui::MouseDownEvent {
+                            position: point(px(300.0), px(220.0)),
+                            button: gpui::MouseButton::Right,
+                            modifiers: gpui::Modifiers::default(),
+                            click_count: 1,
+                            first_mouse: false,
+                        }),
+                        cx,
+                    );
                     window.remove_window();
                 });
-                cx.background_executor().timer(Duration::from_millis(250)).await;
+                drop(pane);
                 cx.update(|cx| cx.quit());
             })
             .detach();
