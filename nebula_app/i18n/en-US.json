@@ -903,5 +903,15 @@
   "files.path_placeholder": "Absolute or relative directory path",
   "files.path_choose": "Choose a directory",
   "files.path_open": "Open directory",
-  "files.path_failed": "Could not open this directory: {error}"
+  "files.path_failed": "Could not open this directory: {error}",
+  "tab_menu": {
+    "fork_ai_session": "Fork AI session",
+    "move_to_new_window": "Move to new window",
+    "export_as_workspace": "Export as workspace…",
+    "split_left_right": "Split left and right",
+    "split_top_bottom": "Split top and bottom",
+    "move_left": "Move left",
+    "move_right": "Move right",
+    "tab_color": "Tab color"
+  }
 }
