@@ -123,6 +123,7 @@
     "delete": "Supprimer",
     "edit": "Modifier",
     "rename": "Renommer",
+    "rename_tab": "Renommer l’onglet",
     "copy": "Copier",
     "paste": "Coller",
     "cut": "Couper",
