@@ -1554,8 +1554,7 @@ mod tests {
         assert_eq!(settings.custom_theme, None);
         assert!(settings.panel_resize);
         assert!(
-            !RuntimeSettings::from_raw(&RawSettings::from_text("panel_resize=0\n"))
-                .panel_resize
+            !RuntimeSettings::from_raw(&RawSettings::from_text("panel_resize=0\n")).panel_resize
         );
         assert_eq!(settings.sidebar_width, DEFAULT_SIDEBAR_WIDTH);
         assert_eq!(settings.ssh_proxy_mode, ProxyModeName::Off);
