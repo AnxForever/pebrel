@@ -92,7 +92,6 @@ fn pairing_design_ssh_cards_keep_icon_anchors_and_compact_filter(cx: &mut gpui::
     });
 }
 
-
 #[test]
 #[ignore = "requires a native Windows desktop and PEBREL_SSH_COPY_QA_DIR"]
 fn native_ssh_copy_context_menu_preview() {
@@ -101,11 +100,12 @@ fn native_ssh_copy_context_menu_preview() {
         crate::platform::Platform::Windows,
         "this screenshot probe requires Windows",
     );
-    use gpui::{
-        Bounds, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, PlatformInput, WindowBounds,
-        WindowOptions, point,
+    use gpui::{Bounds, WindowBounds, WindowOptions, point};
+    use std::{
+        path::PathBuf,
+        sync::{Arc, Mutex},
+        time::Duration,
     };
-    use std::{path::PathBuf, sync::{Arc, Mutex}, time::Duration};
 
     let output =
         PathBuf::from(std::env::var_os("PEBREL_SSH_COPY_QA_DIR").expect("QA output directory"));
@@ -138,10 +138,19 @@ fn native_ssh_copy_context_menu_preview() {
                     },
                     |window, cx| {
                         let view = cx.new(|cx| SettingsPane::new(window, cx));
-                        view.update(cx, |pane, _| {
-                            pane.active_section = 4;
+                        view.update(cx, |pane, cx| {
+                            pane.manage_launcher_ssh(
+                                "root@192.0.2.10".into(),
+                                false,
+                                window,
+                                cx,
+                            );
+                            pane.ssh_delete_confirm = None;
                             pane.ssh_hosts = crate::gpui_shell::ssh_hosts::SshHostLists {
-                                saved: vec!["root@192.0.2.10".into(), "deploy@198.51.100.20".into()],
+                                saved: vec![
+                                    "root@192.0.2.10".into(),
+                                    "deploy@198.51.100.20".into(),
+                                ],
                                 ..Default::default()
                             };
                             let mut alpha =
@@ -167,30 +176,6 @@ fn native_ssh_copy_context_menu_preview() {
                 let opened = cx
                     .update_window(handle.into(), |_, window, cx| -> Result<(), String> {
                         let _ = window.draw(cx);
-                        let bounds = window
-                            .debug_bounds("ssh-host-row-0")
-                            .ok_or("SSH host row was not rendered")?;
-                        let position = bounds.center();
-                        window.dispatch_event(
-                            PlatformInput::MouseDown(MouseDownEvent {
-                                position,
-                                button: MouseButton::Right,
-                                modifiers: Modifiers::default(),
-                                click_count: 1,
-                                first_mouse: false,
-                            }),
-                            cx,
-                        );
-                        window.dispatch_event(
-                            PlatformInput::MouseUp(MouseUpEvent {
-                                position,
-                                button: MouseButton::Right,
-                                modifiers: Modifiers::default(),
-                                click_count: 1,
-                            }),
-                            cx,
-                        );
-                        let _ = window.draw(cx);
                         Ok(())
                     })
                     .map_err(|error| error.to_string())
@@ -201,7 +186,7 @@ fn native_ssh_copy_context_menu_preview() {
                         &menu_ready,
                         serde_json::to_vec(&serde_json::json!({
                             "pid": std::process::id(),
-                            "state": "context-menu",
+                            "state": "host-row-ready",
                             "host": "Alpha",
                         }))
                         .unwrap(),
