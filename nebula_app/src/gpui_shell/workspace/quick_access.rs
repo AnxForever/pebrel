@@ -159,8 +159,9 @@ impl NebulaWorkspace {
         let title = language.pick("选择项目目录", "Select a project directory");
 
         #[cfg(windows)]
-        let picked =
-            crate::gpui_shell::settings_pane::shell_picker::pick_folder_with_wsl_places(window, title);
+        let picked = crate::gpui_shell::settings_pane::shell_picker::pick_folder_with_wsl_places(
+            window, title,
+        );
         #[cfg(not(windows))]
         let picked = cx.prompt_for_paths(gpui::PathPromptOptions {
             files: false,
@@ -322,8 +323,7 @@ impl NebulaWorkspace {
                     .hover(|button| button.bg(hover_bg).text_color(theme.foreground))
                     .tooltip(|window, cx| {
                         gpui_component::tooltip::Tooltip::new(
-                            workspace_ui_language()
-                                .pick("添加项目目录", "Add a project directory"),
+                            workspace_ui_language().pick("添加项目目录", "Add a project directory"),
                         )
                         .build(window, cx)
                     })
@@ -353,11 +353,8 @@ impl NebulaWorkspace {
             // （`wsl:Ubuntu`），所以 Ubuntu 项目拿到的就是 Ubuntu 圆标。
             let id = profile.settings_id().unwrap_or_default();
             let icon_id = profile.shell_id.clone().unwrap_or_else(|| id.clone());
-            let icon = crate::gpui_shell::widgets::shell_brand_image(
-                &icon_id,
-                SIDEBAR_HEADER_ICON,
-                1.0,
-            );
+            let icon =
+                crate::gpui_shell::widgets::shell_brand_image(&icon_id, SIDEBAR_HEADER_ICON, 1.0);
             let glyph = super::shell_picker::fallback_shell_glyph(&icon_id, icon.is_some());
             // 右侧显示目录而不是可执行文件——这一列回答的是「开在哪儿」，与
             // 选择器共用 `profile_location`，但**在刷新时就算好**（见
