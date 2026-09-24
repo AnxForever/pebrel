@@ -83,13 +83,10 @@ jobs:
           Wait-ProbeFile $menuReady 1500
           $probePid = (Get-Content $menuReady -Raw | ConvertFrom-Json).pid
           ./scripts/ui_probe.ps1 -ProcId $probePid -RightClick '520,220' -Shot (Join-Path $qa '01-context-menu.png')
-          ./scripts/ui_probe.ps1 -ProcId $probePid -Click '1000,680'
-          New-Item -ItemType File -Path (Join-Path $qa 'menu-captured') | Out-Null
-
-          $copyReady = Join-Path $qa 'copy-ready.json'
-          Wait-ProbeFile $copyReady 30
+          ./scripts/ui_probe.ps1 -ProcId $probePid -Click '550,294'
+          Start-Sleep -Milliseconds 700
           ./scripts/ui_probe.ps1 -ProcId $probePid -Shot (Join-Path $qa '02-copy-editor.png')
-          New-Item -ItemType File -Path (Join-Path $qa 'copy-captured') | Out-Null
+          New-Item -ItemType File -Path (Join-Path $qa 'capture-complete') | Out-Null
 
           $cargo.WaitForExit()
           Get-Content $stdout -ErrorAction SilentlyContinue
