@@ -66,7 +66,11 @@ fn pairing_design_ssh_cards_keep_icon_anchors_and_compact_filter(cx: &mut gpui::
     cx.update(|window, cx| {
         pane.update(cx, |pane, cx| {
             pane.duplicate_ssh_host("nebula-test".into(), window, cx);
-            assert!(pane.ssh_editor.as_ref().is_some_and(|editor| editor.original_destination.is_none()));
+            assert!(
+                pane.ssh_editor
+                    .as_ref()
+                    .is_some_and(|editor| editor.original_destination.is_none())
+            );
             assert_eq!(pane.ssh_destination_input.read(cx).value(), "");
             assert_eq!(pane.ssh_label_input.read(cx).value(), "Alpha 1");
             pane.close_ssh_editor(window, cx);
