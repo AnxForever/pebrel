@@ -196,13 +196,8 @@ fn native_ssh_copy_context_menu_preview() {
                 *result.lock().unwrap() = Some(opened);
 
                 drop(pane);
-                let _ = cx.update_window(handle.into(), |_, window, cx| {
-                    for _ in 0..2 {
-                        window.dispatch_keystroke(gpui::Keystroke::parse("escape").unwrap(), cx);
-                        let _ = window.draw(cx);
-                    }
-                    window.remove_window();
-                });
+                let _ = cx.update_window(handle.into(), |_, window, _| window.remove_window());
+                cx.background_executor().timer(Duration::from_millis(250)).await;
                 cx.update(|cx| cx.quit());
             })
             .detach();
