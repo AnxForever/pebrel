@@ -4,11 +4,7 @@ Every release entry is provided in English and Simplified Chinese.
 
 每个版本条目均同时提供英文和简体中文说明。
 
-## 1.9.1 - Unreleased / 未发布
-
-Unreleased. Prepared for the changes in PRs #257, #260–#266, #269, #272 and #274; integration and release validation are still pending.
-
-未发布。本文对应 PR #257、#260–#266、#269、#272、#274 中的改动，尚待完成合并与发布验证。
+## 1.9.1 - 2026-09-24
 
 ### English
 
