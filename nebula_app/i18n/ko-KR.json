@@ -105,6 +105,7 @@
     "new_window": "새 창",
     "close_tab": "탭 닫기",
     "duplicate_tab": "탭 복제",
+    "copy_working_directory": "작업 디렉터리 복사",
     "terminal": "터미널",
     "connect": "연결",
     "disconnect": "연결 해제",
@@ -174,5 +175,15 @@
     "copied_lines": "{lines}줄을 클립보드에 복사했습니다",
     "paste_lines": "{lines}줄을 붙여넣을까요?",
     "sent_to": "{target}(으)로 전송했습니다"
+  },
+  "tab_menu": {
+    "fork_ai_session": "AI 세션 분기",
+    "move_to_new_window": "새 창으로 이동",
+    "export_as_workspace": "작업 공간으로 내보내기…",
+    "split_left_right": "좌우로 분할",
+    "split_top_bottom": "위아래로 분할",
+    "move_left": "왼쪽으로 이동",
+    "move_right": "오른쪽으로 이동",
+    "tab_color": "탭 색상"
   }
 }
