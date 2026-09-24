@@ -9,6 +9,12 @@ Proposed for review on 2026-09-24.
 Pebrel already builds and validates a native Windows ARM64 application and portable ZIP,
 but automatic installation still has no ARM64 installer asset.
 
+## Evidence
+
+- The native ARM64 application, Hook and console runtime already build and pass ARM64 conformance.
+- The existing Windows update handoff is architecture-independent once the selected installer and installed payload are native.
+- Inno Setup documents `ArchitecturesAllowed=arm64` for installers shipping ARM64 binaries.
+
 ## Decision
 
 Parameterize the existing Inno installer by architecture instead of creating a second
@@ -25,7 +31,21 @@ A separate ARM64 installer script and a second updater transaction were rejected
 the existing installer and handoff contracts are architecture-independent once the payload
 and release asset are native.
 
+## Consequences
+
+Windows ARM64 gains the same installer-managed update path as x64 without introducing a second
+transaction or migration implementation. Stable releases after 1.9.0 gain one additional asset.
+
 ## Validation
 
 Run the existing packaging tests, stable-release contracts, and native Windows ARM64 CI,
 including actual Inno installer generation.
+
+## Supersedes
+
+None.
+
+## Revisit when
+
+Revisit only if Windows ARM64 requires installer behavior that cannot share the existing x64
+migration and update handoff.
