@@ -1,0 +1,109 @@
+name: SSH copy screenshots
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - "nebula_app/src/gpui_shell/ssh_settings/library.rs"
+      - "nebula_app/src/gpui_shell/ssh_settings/library/tests.rs"
+      - ".github/workflows/ssh-copy-screenshots.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  screenshot:
+    name: Windows UI screenshots
+    runs-on: windows-2022
+    timeout-minutes: 45
+    env:
+      CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: "1"
+      CARGO_TARGET_DIR: target/ci
+      RUST_TOOLCHAIN: "1.97.1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.97.1"
+      - uses: ./.github/actions/rust-cache
+        with:
+          key: native
+          target: target/ci
+          legacy-key: windows
+
+      - name: Capture SSH copy states
+        shell: pwsh
+        run: |
+          $qa = Join-Path $env:RUNNER_TEMP 'ssh-copy-qa'
+          $config = Join-Path $qa 'config'
+          New-Item -ItemType Directory -Force -Path $qa, $config | Out-Null
+          @(
+            'language=en-US'
+            'theme=Nord'
+            'opacity=1'
+            'blur=off'
+            'restore_session=false'
+            'resume_ai=false'
+            'auto_check_updates=off'
+          ) | Set-Content -Path (Join-Path $config 'pebrel_settings.txt') -Encoding ascii
+
+          $env:PEBREL_CONFIG_DIR = $config
+          $env:PEBREL_SSH_COPY_QA_DIR = $qa
+          $stdout = Join-Path $qa 'test.stdout.log'
+          $stderr = Join-Path $qa 'test.stderr.log'
+          $args = @(
+            'test', '-p', 'nebula', '--bin', 'pebrel',
+            '--features', 'gpui-test-support',
+            'native_ssh_copy_context_menu_preview',
+            '--', '--ignored', '--nocapture'
+          )
+          $cargo = Start-Process cargo -ArgumentList $args -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+
+          function Wait-ProbeFile([string]$path, [int]$seconds) {
+            $deadline = (Get-Date).AddSeconds($seconds)
+            while ((Get-Date) -lt $deadline) {
+              if (Test-Path $path) { return }
+              if ($cargo.HasExited) {
+                Get-Content $stdout -ErrorAction SilentlyContinue
+                Get-Content $stderr -ErrorAction SilentlyContinue
+                throw "Screenshot probe exited before $path was created."
+              }
+              Start-Sleep -Milliseconds 500
+            }
+            throw "Timed out waiting for $path."
+          }
+
+          $menuReady = Join-Path $qa 'menu-ready.json'
+          Wait-ProbeFile $menuReady 1500
+          $probePid = (Get-Content $menuReady -Raw | ConvertFrom-Json).pid
+          ./scripts/ui_probe.ps1 -ProcId $probePid -Shot (Join-Path $qa '01-context-menu.png')
+          New-Item -ItemType File -Path (Join-Path $qa 'menu-captured') | Out-Null
+
+          $copyReady = Join-Path $qa 'copy-ready.json'
+          Wait-ProbeFile $copyReady 30
+          ./scripts/ui_probe.ps1 -ProcId $probePid -Shot (Join-Path $qa '02-copy-editor.png')
+          New-Item -ItemType File -Path (Join-Path $qa 'copy-captured') | Out-Null
+
+          $cargo.WaitForExit()
+          Get-Content $stdout -ErrorAction SilentlyContinue
+          Get-Content $stderr -ErrorAction SilentlyContinue
+          if ($cargo.ExitCode -ne 0) {
+            throw "Native screenshot probe failed with exit code $($cargo.ExitCode)."
+          }
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ssh-copy-screenshots
+          path: |
+            ${{ runner.temp }}/ssh-copy-qa/*.png
+            ${{ runner.temp }}/ssh-copy-qa/*.json
+            ${{ runner.temp }}/ssh-copy-qa/*.log
+          if-no-files-found: warn
+          retention-days: 14
+          compression-level: 0
