@@ -27,15 +27,35 @@ class ProhibitedNamesTests(unittest.TestCase):
             env={**os.environ, "PYTHONUTF8": "1"},
         )
 
-    @unittest.skipIf(os.name == "nt", "Windows filenames cannot contain raw invalid UTF-8 bytes")
     def test_invalid_utf8_path_cannot_turn_into_an_empty_diff(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             repository = Path(directory)
             run_git(repository, "init", "-q")
-            with open(os.fsencode(repository) + b"/bad-\xff.rs", "wb") as output:
-                output.write(b"Ghostty\n")
-            run_git(repository, "add", "--all")
-            result = self.check_staged(repository)
+            run_git(repository, "config", "user.name", "CI test")
+            run_git(repository, "config", "user.email", "ci@example.invalid")
+            # Git trees can contain these bytes even when the host filesystem
+            # cannot. Never require a checkout or create an invalid OS filename.
+            def write_object(kind, contents):
+                return subprocess.check_output(
+                    ["git", "hash-object", "-w", "-t", kind, "--stdin"],
+                    input=contents, cwd=repository,
+                ).decode("ascii").strip()
+
+            empty_tree = write_object("tree", b"")
+            base = subprocess.check_output(
+                ["git", "commit-tree", empty_tree], input=b"baseline\n", cwd=repository,
+            ).decode("ascii").strip()
+            blob = write_object("blob", b"Ghostty\n")
+            tree = write_object("tree", b"100644 bad-\xff.rs\0" + bytes.fromhex(blob))
+            head = subprocess.check_output(
+                ["git", "commit-tree", tree, "-p", base],
+                input=b"invalid path fixture\n", cwd=repository,
+            ).decode("ascii").strip()
+            result = subprocess.run(
+                [sys.executable, str(CHECKER), "range", "--base", base, "--head", head],
+                cwd=repository, text=True, encoding="utf-8", capture_output=True,
+                env={**os.environ, "PYTHONUTF8": "1"},
+            )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("utf-8", result.stderr.lower())
 

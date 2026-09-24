@@ -14,6 +14,10 @@ The repository already used an ignored `scripts/check_prohibited_names.py` in st
 - The local checker already owns the prohibited-name list and hook behavior; duplicating the list in workflow YAML would create a second policy source.
 - Inline copyright/third-party attribution can contain a project name, while Cargo git/source references and protocol/external-format identifiers include key-reporting constants, multiplexer escape sequences, and theme-format variants.
 
+- macOS run 35950152526 rejected a malformed UTF-8 filename before the checker
+  could run. The fixture now writes a Git tree directly, preserving the same
+  invalid-path regression without depending on filesystem filename support.
+
 ## Decision
 
 - Publish the existing checker as the single policy implementation and add a fail-closed range mode.
@@ -34,7 +38,7 @@ New PR/merge-group/main-push text and commit subjects are checked by the existin
 
 ## Validation
 
-`scripts/tests/test_prohibited_names.py` covers ordinary comparison failure, inline attribution positive/negative paths, protocol identifiers, Cargo dependency references, GitHub CLI text, range text, range commit messages, diverged related bases, unrelated/missing bases, old-history exclusion, added-then-deleted text, and merge-resolution additions. The checker also covers malformed UTF-8 paths/text and normal Unicode/control-character paths; the raw-byte path fixture runs on POSIX, where that filename can exist.
+`scripts/tests/test_prohibited_names.py` covers ordinary comparison failure, inline attribution positive/negative paths, protocol identifiers, Cargo dependency references, GitHub CLI text, range text, range commit messages, diverged related bases, unrelated/missing bases, old-history exclusion, added-then-deleted text, and merge-resolution additions. The checker also covers malformed UTF-8 paths/text and normal Unicode/control-character paths; the malformed-path fixture constructs Git tree objects without checking them out, so it also runs on filesystems that reject those bytes.
 
 ## Supersedes
 
