@@ -45,6 +45,8 @@
     }
   },
   "common": {
+    "link_command_click": "Command+щелчок левой кнопкой для открытия",
+    "link_ctrl_click": "Ctrl+щелчок левой кнопкой для открытия",
     "settings": "Настройки",
     "language": "Язык",
     "about": "О программе",

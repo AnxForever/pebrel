@@ -45,6 +45,8 @@
     }
   },
   "common": {
+    "link_command_click": "Command+clic izquierdo para abrir",
+    "link_ctrl_click": "Ctrl+clic izquierdo para abrir",
     "settings": "Configuración",
     "language": "Idioma",
     "about": "Acerca de",

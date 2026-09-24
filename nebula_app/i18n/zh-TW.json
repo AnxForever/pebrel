@@ -69,6 +69,8 @@
     }
   },
   "common": {
+    "link_command_click": "Command+左鍵開啟",
+    "link_ctrl_click": "Ctrl+左鍵開啟",
     "settings": "設定",
     "language": "語言",
     "about": "關於",
