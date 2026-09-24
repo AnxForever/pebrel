@@ -101,10 +101,7 @@ mod tests {
     }
     #[test]
     fn windows_architectures_are_exact() {
-        assert_eq!(
-            windows_names("1.9.1", "aarch64"),
-            ["Pebrel-v1.9.1-windows-arm64-setup.exe"]
-        );
+        assert_eq!(windows_names("1.9.1", "aarch64"), ["Pebrel-v1.9.1-windows-arm64-setup.exe"]);
         assert!(windows_names("1.9.1", "unknown").is_empty());
     }
     #[test]
