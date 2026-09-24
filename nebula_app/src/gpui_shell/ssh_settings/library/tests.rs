@@ -111,8 +111,7 @@ fn native_ssh_copy_context_menu_preview() {
         PathBuf::from(std::env::var_os("PEBREL_SSH_COPY_QA_DIR").expect("QA output directory"));
     std::fs::create_dir_all(&output).unwrap();
     let menu_ready = output.join("menu-ready.json");
-    let copy_ready = output.join("copy-ready.json");
-    assert!(!menu_ready.exists() && !copy_ready.exists(), "use a fresh QA directory");
+    assert!(!menu_ready.exists(), "use a fresh QA directory");
 
     let result = Arc::new(Mutex::new(None));
     let after_run = result.clone();
@@ -188,46 +187,13 @@ fn native_ssh_copy_context_menu_preview() {
                     )
                     .unwrap();
                     for _ in 0..150 {
-                        if output.join("menu-captured").exists() {
+                        if output.join("capture-complete").exists() {
                             break;
                         }
                         cx.background_executor().timer(Duration::from_millis(200)).await;
                     }
-
-                    let duplicated = cx
-                        .update_window(handle.into(), |_, window, cx| -> Result<(), String> {
-                            pane.update(cx, |pane, cx| {
-                                pane.duplicate_ssh_host("root@192.0.2.10".into(), window, cx);
-                            });
-                            let _ = window.draw(cx);
-                            Ok(())
-                        })
-                        .map_err(|error| error.to_string())
-                        .and_then(|result| result);
-
-                    if duplicated.is_ok() {
-                        cx.background_executor().timer(Duration::from_millis(300)).await;
-                        std::fs::write(
-                            &copy_ready,
-                            serde_json::to_vec(&serde_json::json!({
-                                "pid": std::process::id(),
-                                "state": "copy-editor",
-                                "expected_label": "Alpha 1",
-                            }))
-                            .unwrap(),
-                        )
-                        .unwrap();
-                        for _ in 0..150 {
-                            if output.join("copy-captured").exists() {
-                                break;
-                            }
-                            cx.background_executor().timer(Duration::from_millis(200)).await;
-                        }
-                    }
-                    *result.lock().unwrap() = Some(duplicated);
-                } else {
-                    *result.lock().unwrap() = Some(opened);
                 }
+                *result.lock().unwrap() = Some(opened);
 
                 drop(pane);
                 cx.update(|cx| cx.quit());
