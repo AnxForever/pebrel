@@ -10,6 +10,7 @@ Every release entry is provided in English and Simplified Chinese.
 
 #### Added
 
+- Added a native Windows ARM64 installer and in-app automatic installation, alongside the existing ARM64 portable ZIP.
 - Added in-app updates for packaged macOS applications on Apple Silicon and Intel. Verified updates can install after restart or on the next launch, then restore the saved workspace. Immediate relaunch failure rolls back to the original application. Installation requires a writable application location; copies running from a disk image or App Translocation must first be moved.
 - Added SSH display names to the Shell picker, Quick Jump and command palette. Named hosts show their configured name alongside the original connection target; unnamed hosts keep the previous display. Search matches both the name and target, and selecting a row still connects to the original destination.
 - Added a configurable tab-rename shortcut in Settings → Key Bindings → Tabs. The default remains F2; changing or clearing the shortcut lets F2 reach terminal applications such as Codex CLI. Changes apply without restarting, and menu shortcut hints follow the effective binding.
@@ -32,12 +33,13 @@ Every release entry is provided in English and Simplified Chinese.
 - Organized Windows Explorer integration into one normal Pebrel open command and one WSL submenu containing the installed distributions. Installation migrates Pebrel-owned flat entries while preserving unrelated or user-edited commands.
 - Expanded issue forms with operating-system, shell, pane-program and connection details, and clearer reproduction and evidence fields to make problem reports easier to investigate.
 
-Windows x64 provides an installer and portable ZIP; Windows ARM64 provides a native portable ZIP. On Windows, the installer and automatic installation remain x64-only; packaged macOS applications support in-app installation. Linux x64 packages and macOS Apple Silicon / Intel DMGs remain Preview releases.
+Windows x64 and ARM64 provide installers and portable ZIPs. On Windows, automatic installation supports both architectures; packaged macOS applications support in-app installation. Linux x64 packages and macOS Apple Silicon / Intel DMGs remain Preview releases.
 
 ### 中文
 
 #### 新增
 
+- 新增原生 Windows ARM64 安装器及应用内自动安装，同时保留 ARM64 便携 ZIP。
 - 为 Apple Silicon 和 Intel 上的 macOS 打包应用加入应用内更新：校验通过后，可选择重启安装或下次启动时安装，并恢复已保存的工作区；新应用立即重启失败时回滚到原应用。安装位置必须可写，从磁盘映像或 App Translocation 路径运行的副本需先移动到正常安装位置。
 - 在 Shell 选择器、快速跳转和命令面板中显示 SSH 主机名称：已命名的主机显示名称与原始连接目标，未命名的主机保持原来的显示。搜索同时匹配名称和目标，选择后仍连接原始地址。
 - 在“设置 → 按键映射 → 标签页”中新增可修改的“重命名标签”快捷键，默认仍为 F2。修改或清除后，F2 可传递给 Codex CLI 等终端程序；设置无需重启即可生效，菜单提示同步显示实际快捷键。
@@ -60,7 +62,7 @@ Windows x64 provides an installer and portable ZIP; Windows ARM64 provides a nat
 - 整理 Windows 资源管理器右键菜单，保留一个普通 Pebrel 打开入口，并将已安装的 WSL 发行版集中到一个子菜单中；安装时迁移 Pebrel 自有的旧平铺入口，保留无关或经过用户编辑的命令。
 - 完善问题反馈表单，补充操作系统、Shell、面板程序和连接方式等信息，并明确复现步骤与日志、截图要求，便于定位问题。
 
-Windows x64 提供安装器和 ZIP 便携包，Windows ARM64 提供原生便携 ZIP；Windows 安装器和自动安装仍仅支持 x64；macOS 打包应用支持应用内安装。Linux x64 包及 macOS Apple Silicon／Intel DMG 继续标记为 Preview。
+Windows x64 与 ARM64 均提供安装器和 ZIP 便携包；Windows 自动安装支持两种架构；macOS 打包应用支持应用内安装。Linux x64 包及 macOS Apple Silicon／Intel DMG 继续标记为 Preview。
 
 ### Contributors
 
@@ -84,6 +86,7 @@ Checksums will be filled from the final release artifacts. / 校验值将在最�
 - `Pebrel-v1.9.1-windows-x64.zip`: `PENDING FINAL BUILD`
 - `Pebrel-v1.9.1-windows-x64-setup.exe`: `PENDING FINAL BUILD`
 - `Pebrel-v1.9.1-windows-arm64.zip`: `PENDING FINAL BUILD`
+- `Pebrel-v1.9.1-windows-arm64-setup.exe`: `PENDING FINAL BUILD`
 
 ## 1.9.0 - 2026-09-22
 

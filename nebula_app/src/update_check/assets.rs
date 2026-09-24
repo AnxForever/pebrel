@@ -14,12 +14,18 @@ pub(crate) fn macos_names(version: &str, architecture: &str) -> Vec<String> {
     ]
 }
 
+pub(crate) fn windows_names(version: &str, architecture: &str) -> Vec<String> {
+    match architecture {
+        "x86_64" => super::windows_x64_installer_names(version).to_vec(),
+        "aarch64" => vec![format!("Pebrel-v{version}-windows-arm64-setup.exe")],
+        _ => Vec::new(),
+    }
+}
+
 pub(crate) fn native_names(version: &str) -> Vec<String> {
     match Platform::current() {
         Platform::MacOS => macos_names(version, std::env::consts::ARCH),
-        Platform::Windows if std::env::consts::ARCH == "x86_64" => {
-            super::windows_x64_installer_names(version).to_vec()
-        },
+        Platform::Windows => windows_names(version, std::env::consts::ARCH),
         _ => Vec::new(),
     }
 }
@@ -92,6 +98,14 @@ mod tests {
                 .collect::<Vec<_>>();
             assert_eq!(select("1.9.0", "", &assets, &names).unwrap().name, names[0]);
         }
+    }
+    #[test]
+    fn windows_architectures_are_exact() {
+        assert_eq!(
+            windows_names("1.9.1", "aarch64"),
+            ["Pebrel-v1.9.1-windows-arm64-setup.exe"]
+        );
+        assert!(windows_names("1.9.1", "unknown").is_empty());
     }
     #[test]
     fn checksum_manifest_requires_one_exact_valid_entry() {

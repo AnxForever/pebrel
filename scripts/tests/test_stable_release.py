@@ -106,7 +106,8 @@ class StableReleaseTests(unittest.TestCase):
         arm = workflow.split("\n  windows-arm64:\n", 1)[1].split("\n  aggregate:\n", 1)[0]
         for required in ("runs-on: windows-11-arm", "host: aarch64-pc-windows-msvc",
                          "-Architecture arm64", "windows-arm64-report.json",
-                         "scripts/build-windows-product.ps1", "--platform windows-aarch64"):
+                         "scripts/build-windows-product.ps1", "scripts/build-installer.ps1",
+                         "windows-arm64-setup.exe", "--platform windows-aarch64"):
             self.assertIn(required, arm)
         self.assertNotIn("continue-on-error", arm)
         self.assertNotIn("always()", aggregate)
@@ -140,7 +141,8 @@ class StableReleaseTests(unittest.TestCase):
         for version in ("1.7.0", "1.7.1", "1.10.0", "2.0.0"):
             with self.subTest(version=version):
                 names = expected_asset_names(version)
-                self.assertEqual(len(names), 8 if tuple(map(int, version.split('.'))) >= (1, 9, 0) else 7)
+                parsed = tuple(map(int, version.split('.')))
+                self.assertEqual(len(names), 9 if parsed > (1, 9, 0) else 8 if parsed >= (1, 9, 0) else 7)
                 self.assertIn(f"Pebrel-v{version}-windows-x64-setup.exe", names)
                 self.assertNotIn(f"NebulaTerminal-{version}-windows-x64-setup.exe", names)
 
@@ -155,6 +157,15 @@ class StableReleaseTests(unittest.TestCase):
             (root / "Pebrel-v1.9.0-windows-arm64.zip").unlink()
             with self.assertRaisesRegex(StableReleaseError, "missing: Pebrel-v1.9.0-windows-arm64.zip"):
                 validate_assets(root, version)
+
+    def test_post_190_requires_native_windows_arm64_installer(self) -> None:
+        self.assertNotIn("Pebrel-v1.9.0-windows-arm64-setup.exe", expected_asset_names("1.9.0"))
+        for version in ("1.9.1", "1.10.0", "2.0.0"):
+            with self.subTest(version=version):
+                self.assertIn(
+                    f"Pebrel-v{version}-windows-arm64-setup.exe",
+                    expected_asset_names(version),
+                )
 
     def test_17_assets_reject_retired_alias_and_missing_installer(self) -> None:
         version = "1.7.0"
