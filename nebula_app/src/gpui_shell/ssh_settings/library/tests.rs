@@ -139,12 +139,7 @@ fn native_ssh_copy_context_menu_preview() {
                     |window, cx| {
                         let view = cx.new(|cx| SettingsPane::new(window, cx));
                         view.update(cx, |pane, cx| {
-                            pane.manage_launcher_ssh(
-                                "root@192.0.2.10".into(),
-                                false,
-                                window,
-                                cx,
-                            );
+                            pane.manage_launcher_ssh("root@192.0.2.10".into(), false, window, cx);
                             pane.ssh_delete_confirm = None;
                             pane.ssh_hosts = crate::gpui_shell::ssh_hosts::SshHostLists {
                                 saved: vec![
