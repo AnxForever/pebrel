@@ -105,3 +105,16 @@ pub(crate) fn guard_base(executable: &Path) -> PathBuf {
     }
     executable.parent().expect("canonical executable parent").join(".pebrel-update")
 }
+
+/// Select and materialize the native helper; transaction authority stays with the caller.
+pub(crate) fn spawn_prepared_helper(directory: &Path, plan: &Path) -> Result<Child, String> {
+    #[cfg(target_os = "macos")]
+    return macos::spawn(directory, plan);
+    #[cfg(not(target_os = "macos"))]
+    {
+        let helper = directory.join("handoff.ps1");
+        crate::atomic_file::write(&helper, include_bytes!("../update_download/handoff.ps1"))
+            .map_err(|error| error.to_string())?;
+        spawn_helper(&helper, plan).map_err(|error| error.to_string())
+    }
+}

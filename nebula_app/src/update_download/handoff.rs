@@ -162,16 +162,8 @@ pub(crate) fn prepare(asset: &UpdateAsset) -> Result<PreparedUpdate, String> {
         &serde_json::to_vec(&plan_path).map_err(|error| error.to_string())?,
     )
     .map_err(|error| error.to_string())?;
-    #[cfg(target_os = "macos")]
-    let child = macos::spawn(&directory, &plan_path)?;
-    #[cfg(not(target_os = "macos"))]
-    let child = {
-        let helper = directory.join("handoff.ps1");
-        crate::atomic_file::write(&helper, include_bytes!("handoff.ps1"))
-            .map_err(|error| error.to_string())?;
-        crate::platform::update_installation::spawn_helper(&helper, &plan_path)
-            .map_err(|error| error.to_string())?
-    };
+    let child =
+        crate::platform::update_installation::spawn_prepared_helper(&directory, &plan_path)?;
     let mut prepared = PreparedUpdate { directory, transaction, child, committed: false };
     let timeout = if crate::platform::Platform::current() == crate::platform::Platform::MacOS {
         600

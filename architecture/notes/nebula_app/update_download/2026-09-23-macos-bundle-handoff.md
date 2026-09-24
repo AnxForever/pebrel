@@ -58,6 +58,14 @@ this bounded launch check; the retained backup and durable workspace remain.
 Cancelled or rejected transactions keep the original application running. Helpers
 have bounded preparation, commit and exit waits and never kill the user's process.
 
+The platform adapter also owns helper materialization and launch selection. The
+shared transaction requests a helper through one platform-independent entry,
+without adding operating-system branches to prepare/commit orchestration.
+Native command output is spooled to temporary files while enforcing the existing
+process deadline, then read with a 2 MiB limit per stream. Polling a child before
+reading piped output can otherwise block both processes once a pipe fills. A
+native regression produces 256 KiB on each stream and checks command failure.
+
 ## Rejected alternatives
 
 - Replacing a running bundle: risks mixed resources and incomplete session saves.

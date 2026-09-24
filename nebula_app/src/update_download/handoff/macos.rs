@@ -20,20 +20,6 @@ pub(crate) fn run_helper_if_requested() -> Option<i32> {
     })
 }
 
-pub(crate) fn spawn(directory: &Path, plan: &Path) -> Result<Child, String> {
-    let helper = directory.join("handoff");
-    std::fs::copy(std::env::current_exe().map_err(|e| e.to_string())?, &helper)
-        .map_err(|e| e.to_string())?;
-    Command::new(helper)
-        .arg("--internal-macos-update")
-        .arg(plan)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|e| e.to_string())
-}
-
 fn run(path: &Path) -> Result<(), String> {
     let path = canonical(path).map_err(|e| e.to_string())?;
     let directory = path.parent().ok_or("Missing update directory")?;

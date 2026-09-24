@@ -3,14 +3,31 @@ use std::ffi::{CStr, CString};
 use std::io;
 use std::os::unix::ffi::OsStrExt as _;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
+use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
+pub(crate) fn spawn(directory: &Path, plan: &Path) -> Result<Child, String> {
+    let helper = directory.join("handoff");
+    std::fs::copy(std::env::current_exe().map_err(|e| e.to_string())?, &helper)
+        .map_err(|e| e.to_string())?;
+    Command::new(helper)
+        .arg("--internal-macos-update")
+        .arg(plan)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| e.to_string())
+}
+
 pub(crate) fn run(command: &mut Command) -> Result<Output, String> {
+    // Regular files cannot fill a pipe while we poll for process completion.
+    let stdout = tempfile::NamedTempFile::new().map_err(|e| e.to_string())?;
+    let stderr = tempfile::NamedTempFile::new().map_err(|e| e.to_string())?;
     let mut child = command
         .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stdout(stdout.reopen().map_err(|e| e.to_string())?)
+        .stderr(stderr.reopen().map_err(|e| e.to_string())?)
         .spawn()
         .map_err(|e| e.to_string())?;
     let deadline = Instant::now() + Duration::from_secs(120);
@@ -22,7 +39,17 @@ pub(crate) fn run(command: &mut Command) -> Result<Output, String> {
         }
         std::thread::sleep(Duration::from_millis(25));
     }
-    let output = child.wait_with_output().map_err(|e| e.to_string())?;
+    let read_output = |file: &tempfile::NamedTempFile| -> Result<Vec<u8>, String> {
+        if file.as_file().metadata().map_err(|e| e.to_string())?.len() > 2 * 1024 * 1024 {
+            return Err("macOS update command output exceeded its limit".into());
+        }
+        std::fs::read(file.path()).map_err(|e| e.to_string())
+    };
+    let output = Output {
+        status: child.wait().map_err(|e| e.to_string())?,
+        stdout: read_output(&stdout)?,
+        stderr: read_output(&stderr)?,
+    };
     if !output.status.success() {
         return Err(format!(
             "macOS update command failed ({}): {}",
@@ -223,6 +250,16 @@ pub(crate) fn stage(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn command_output_larger_than_a_pipe_is_drained() {
+        let output = run(Command::new("/bin/sh")
+            .args(["-c", "head -c 262144 /dev/zero; head -c 262144 /dev/zero >&2"]))
+        .unwrap();
+        assert_eq!(output.stdout.len(), 262144);
+        assert_eq!(output.stderr.len(), 262144);
+        assert!(run(Command::new("/bin/sh").args(["-c", "exit 7"])).is_err());
+    }
+
     #[test]
     fn atomic_exchange_keeps_a_complete_original_and_can_roll_back() {
         let dir = tempfile::tempdir().unwrap();
