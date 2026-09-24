@@ -82,7 +82,8 @@ jobs:
           $menuReady = Join-Path $qa 'menu-ready.json'
           Wait-ProbeFile $menuReady 1500
           $probePid = (Get-Content $menuReady -Raw | ConvertFrom-Json).pid
-          ./scripts/ui_probe.ps1 -ProcId $probePid -Shot (Join-Path $qa '01-context-menu.png')
+          ./scripts/ui_probe.ps1 -ProcId $probePid -RightClick '520,220' -Shot (Join-Path $qa '01-context-menu.png')
+          ./scripts/ui_probe.ps1 -ProcId $probePid -Click '1000,680'
           New-Item -ItemType File -Path (Join-Path $qa 'menu-captured') | Out-Null
 
           $copyReady = Join-Path $qa 'copy-ready.json'
