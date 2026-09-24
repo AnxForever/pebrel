@@ -196,6 +196,7 @@ fn native_ssh_copy_context_menu_preview() {
                 *result.lock().unwrap() = Some(opened);
 
                 drop(pane);
+                let _ = cx.update_window(handle.into(), |_, window, _| window.remove_window());
                 cx.update(|cx| cx.quit());
             })
             .detach();
