@@ -230,7 +230,6 @@ fn native_ssh_copy_context_menu_preview() {
                 }
 
                 drop(pane);
-                let _ = cx.update_window(handle.into(), |_, window, _| window.remove_window());
                 cx.update(|cx| cx.quit());
             })
             .detach();
