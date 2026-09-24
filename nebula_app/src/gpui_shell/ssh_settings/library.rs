@@ -121,12 +121,7 @@ impl SettingsPane {
         self.ssh_library.reset_scroll();
     }
 
-    fn duplicate_ssh_host(
-        &mut self,
-        host: String,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn duplicate_ssh_host(&mut self, host: String, window: &mut Window, cx: &mut Context<Self>) {
         let label = self
             .ssh_hosts
             .profiles
@@ -140,10 +135,8 @@ impl SettingsPane {
         if let Some(editor) = self.ssh_editor.as_mut() {
             editor.original_destination = None;
         }
-        self.ssh_destination_input
-            .update(cx, |input, cx| input.set_value("", window, cx));
-        self.ssh_label_input
-            .update(cx, |input, cx| input.set_value(label, window, cx));
+        self.ssh_destination_input.update(cx, |input, cx| input.set_value("", window, cx));
+        self.ssh_label_input.update(cx, |input, cx| input.set_value(label, window, cx));
         self.ssh_password_input.update(cx, |input, cx| {
             input.set_placeholder(
                 crate::gpui_shell::config::ui_language(cx)
@@ -499,32 +492,20 @@ impl SettingsPane {
                                 },
                             ),
                         )
-                        .item(
-                            PopupMenuItem::new(language.text(Message::LauncherEdit)).on_click(
-                                move |_, window, cx| {
-                                    let _ = edit_owner.update(cx, |this, cx| {
-                                        this.open_ssh_editor(
-                                            Some(edit_host.clone()),
-                                            window,
-                                            cx,
-                                        );
-                                    });
-                                },
-                            ),
-                        )
-                        .item(
-                            PopupMenuItem::new(language.text(Message::CommonCopy)).on_click(
-                                move |_, window, cx| {
-                                    let _ = duplicate_owner.update(cx, |this, cx| {
-                                        this.duplicate_ssh_host(
-                                            duplicate_host.clone(),
-                                            window,
-                                            cx,
-                                        );
-                                    });
-                                },
-                            ),
-                        )
+                        .item(PopupMenuItem::new(language.text(Message::LauncherEdit)).on_click(
+                            move |_, window, cx| {
+                                let _ = edit_owner.update(cx, |this, cx| {
+                                    this.open_ssh_editor(Some(edit_host.clone()), window, cx);
+                                });
+                            },
+                        ))
+                        .item(PopupMenuItem::new(language.text(Message::CommonCopy)).on_click(
+                            move |_, window, cx| {
+                                let _ = duplicate_owner.update(cx, |this, cx| {
+                                    this.duplicate_ssh_host(duplicate_host.clone(), window, cx);
+                                });
+                            },
+                        ))
                         .item(
                             PopupMenuItem::new(language.text(Message::LauncherDelete)).on_click(
                                 move |_, _, cx| {
