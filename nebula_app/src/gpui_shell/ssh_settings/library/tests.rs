@@ -31,6 +31,9 @@ fn pairing_design_ssh_cards_keep_icon_anchors_and_compact_filter(cx: &mut gpui::
                 pinned: vec!["second-host".into()],
                 ..Default::default()
             };
+            let mut profile = pane.ssh_hosts.profiles.for_destination("nebula-test");
+            profile.label = Some("Alpha".into());
+            pane.ssh_hosts.profiles.upsert(profile);
         });
         pane = Some(view.clone());
         gpui_component::Root::new(view, window, cx)
@@ -60,6 +63,16 @@ fn pairing_design_ssh_cards_keep_icon_anchors_and_compact_filter(cx: &mut gpui::
             assert!(action.right() <= first.right());
         }
     }
+    cx.update(|window, cx| {
+        pane.update(cx, |pane, cx| {
+            pane.duplicate_ssh_host("nebula-test".into(), window, cx);
+            assert!(pane.ssh_editor.as_ref().is_some_and(|editor| editor.original_destination.is_none()));
+            assert_eq!(pane.ssh_destination_input.read(cx).value(), "");
+            assert_eq!(pane.ssh_label_input.read(cx).value(), "Alpha 1");
+            pane.close_ssh_editor(window, cx);
+        });
+    });
+
     let pin_filter = cx.debug_bounds("host-scope-1").unwrap();
     let point = gpui::point(pin_filter.origin.x + px(4.0), pin_filter.center().y);
     cx.simulate_mouse_down(point, MouseButton::Left, gpui::Modifiers::default());
