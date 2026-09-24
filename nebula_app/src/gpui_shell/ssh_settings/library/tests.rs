@@ -91,3 +91,170 @@ fn pairing_design_ssh_cards_keep_icon_anchors_and_compact_filter(cx: &mut gpui::
         })
     });
 }
+
+
+#[test]
+#[ignore = "requires a native Windows desktop and PEBREL_SSH_COPY_QA_DIR"]
+fn native_ssh_copy_context_menu_preview() {
+    assert_eq!(
+        crate::platform::Platform::current(),
+        crate::platform::Platform::Windows,
+        "this screenshot probe requires Windows",
+    );
+    use gpui::{
+        Bounds, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, PlatformInput, WindowBounds,
+        WindowOptions, point,
+    };
+    use std::{path::PathBuf, sync::{Arc, Mutex}, time::Duration};
+
+    let output =
+        PathBuf::from(std::env::var_os("PEBREL_SSH_COPY_QA_DIR").expect("QA output directory"));
+    std::fs::create_dir_all(&output).unwrap();
+    let menu_ready = output.join("menu-ready.json");
+    let copy_ready = output.join("copy-ready.json");
+    assert!(!menu_ready.exists() && !copy_ready.exists(), "use a fresh QA directory");
+
+    let result = Arc::new(Mutex::new(None));
+    let after_run = result.clone();
+    gpui_platform::application().with_assets(crate::gpui_shell::assets::NebulaAssets).run(
+        move |cx| {
+            gpui_component::init(cx);
+            cx.set_global(crate::gpui_shell::config::Settings::load(
+                nebula_settings::ThemeName::Nord,
+            ));
+            crate::gpui_shell::theme::apply_chrome_theme(cx);
+
+            let mut pane = None;
+            let handle = cx
+                .open_window(
+                    WindowOptions {
+                        window_bounds: Some(WindowBounds::Windowed(Bounds::new(
+                            point(px(60.0), px(70.0)),
+                            gpui::size(px(1080.0), px(720.0)),
+                        ))),
+                        focus: false,
+                        show: true,
+                        ..Default::default()
+                    },
+                    |window, cx| {
+                        let view = cx.new(|cx| SettingsPane::new(window, cx));
+                        view.update(cx, |pane, _| {
+                            pane.active_section = 4;
+                            pane.ssh_hosts = crate::gpui_shell::ssh_hosts::SshHostLists {
+                                saved: vec!["root@192.0.2.10".into(), "deploy@198.51.100.20".into()],
+                                ..Default::default()
+                            };
+                            let mut alpha =
+                                pane.ssh_hosts.profiles.for_destination("root@192.0.2.10");
+                            alpha.label = Some("Alpha".into());
+                            alpha.auth = crate::ssh_profiles::SshAuthMode::PublicKey;
+                            alpha.private_keys.push("C:\\Keys\\alpha_ed25519".into());
+                            pane.ssh_hosts.profiles.upsert(alpha);
+                            let mut beta =
+                                pane.ssh_hosts.profiles.for_destination("deploy@198.51.100.20");
+                            beta.label = Some("Beta".into());
+                            pane.ssh_hosts.profiles.upsert(beta);
+                        });
+                        pane = Some(view.clone());
+                        cx.new(|cx| gpui_component::Root::new(view, window, cx))
+                    },
+                )
+                .unwrap();
+            let pane = pane.unwrap();
+
+            cx.spawn(async move |cx| {
+                cx.background_executor().timer(Duration::from_millis(700)).await;
+                let opened = cx
+                    .update_window(handle.into(), |_, window, cx| -> Result<(), String> {
+                        let _ = window.draw(cx);
+                        let bounds = window
+                            .debug_bounds("ssh-host-row-0")
+                            .ok_or("SSH host row was not rendered")?;
+                        let position = bounds.center();
+                        window.dispatch_event(
+                            PlatformInput::MouseDown(MouseDownEvent {
+                                position,
+                                button: MouseButton::Right,
+                                modifiers: Modifiers::default(),
+                                click_count: 1,
+                                first_mouse: false,
+                            }),
+                            cx,
+                        );
+                        window.dispatch_event(
+                            PlatformInput::MouseUp(MouseUpEvent {
+                                position,
+                                button: MouseButton::Right,
+                                modifiers: Modifiers::default(),
+                                click_count: 1,
+                            }),
+                            cx,
+                        );
+                        let _ = window.draw(cx);
+                        Ok(())
+                    })
+                    .map_err(|error| error.to_string())
+                    .and_then(|result| result);
+
+                if opened.is_ok() {
+                    std::fs::write(
+                        &menu_ready,
+                        serde_json::to_vec(&serde_json::json!({
+                            "pid": std::process::id(),
+                            "state": "context-menu",
+                            "host": "Alpha",
+                        }))
+                        .unwrap(),
+                    )
+                    .unwrap();
+                    for _ in 0..150 {
+                        if output.join("menu-captured").exists() {
+                            break;
+                        }
+                        cx.background_executor().timer(Duration::from_millis(200)).await;
+                    }
+
+                    let duplicated = cx
+                        .update_window(handle.into(), |_, window, cx| -> Result<(), String> {
+                            pane.update(cx, |pane, cx| {
+                                pane.duplicate_ssh_host("root@192.0.2.10".into(), window, cx);
+                            });
+                            let _ = window.draw(cx);
+                            Ok(())
+                        })
+                        .map_err(|error| error.to_string())
+                        .and_then(|result| result);
+
+                    if duplicated.is_ok() {
+                        cx.background_executor().timer(Duration::from_millis(300)).await;
+                        std::fs::write(
+                            &copy_ready,
+                            serde_json::to_vec(&serde_json::json!({
+                                "pid": std::process::id(),
+                                "state": "copy-editor",
+                                "expected_label": "Alpha 1",
+                            }))
+                            .unwrap(),
+                        )
+                        .unwrap();
+                        for _ in 0..150 {
+                            if output.join("copy-captured").exists() {
+                                break;
+                            }
+                            cx.background_executor().timer(Duration::from_millis(200)).await;
+                        }
+                    }
+                    *result.lock().unwrap() = Some(duplicated);
+                } else {
+                    *result.lock().unwrap() = Some(opened);
+                }
+
+                drop(pane);
+                let _ = cx.update_window(handle.into(), |_, window, _| window.remove_window());
+                cx.update(|cx| cx.quit());
+            })
+            .detach();
+        },
+    );
+    assert_eq!(*after_run.lock().unwrap(), Some(Ok(())));
+}
