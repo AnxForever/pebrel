@@ -45,6 +45,8 @@
     }
   },
   "common": {
+    "link_command_click": "Command+왼쪽 클릭으로 열기",
+    "link_ctrl_click": "Ctrl+왼쪽 클릭으로 열기",
     "settings": "설정",
     "language": "언어",
     "about": "정보",
