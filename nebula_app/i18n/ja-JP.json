@@ -45,6 +45,8 @@
     }
   },
   "common": {
+    "link_command_click": "Command+左クリックで開く",
+    "link_ctrl_click": "Ctrl+左クリックで開く",
     "settings": "設定",
     "language": "言語",
     "about": "このアプリについて",
