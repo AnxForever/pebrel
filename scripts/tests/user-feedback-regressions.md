@@ -1,7 +1,7 @@
 # 用户反馈回归测试清单
 
 本清单覆盖 2026-09-23 汇总的 Hook、更新、窗口材质、链接、Codex 显示与
-Windows 右键菜单反馈。它是验收合同，不表示下列功能已经全部修复。
+Windows 右键菜单与 F2 快捷键冲突反馈。它是验收合同，不表示下列功能已经全部修复。
 `待验证`、`等待日志`、`部分覆盖` 均不得作为 Issue 已解决的依据。
 
 ## 执行与证据
@@ -36,6 +36,8 @@ Windows 右键菜单反馈。它是验收合同，不表示下列功能已经全
 | CODEX-SPARKLE | 对照终端 中可见的 Codex 星点在 Pebrel 不显示 | 核对真彩色能力、OSC 10/11 回答、盲文点字与前/背景色；真实 PTY 录制/回放；关闭动画时不强制产生动画 | 相同 Codex 可执行文件/模型/设置，对照 WT；分别覆盖 low/high/xhigh/max/ultra、Max→xhigh 回退、持续星点与一次性等级动画；以 CLI 实际输出为准，不能由终端自行按等级添加/过滤星点；不能伪造 `WT_SESSION` 来冒充 WT | 完整 Windows 子环境漏真彩色声明已修复；8 项环境回归、10 项身份/WSL 透传回归及 15 主题 VT 回放通过；真实产品星点字形/背景截图已核对；已观察到 Codex 0.154.0 在 xhigh 持续输出变化的星点；其源码持续星点与 Max/Ultra 一次性动画分别控制；与对照终端的等级切换差异仍待验收 |
 | CODEX-MESSAGE | **所有主题**的 Codex 用户消息与 AI 回复背景缺少区分 | 保留/正确映射应用给出的用户消息背景；未提供背景时不得凭屏幕文字猜测角色；消息文本对比度不退化 | 遍历主题注册表中的全部内置主题；输入框与已发送的单/多行、中英混排消息；深浅切换、滚动回看；用户消息应有可辨认浅色背景区 | 15 个内置主题 + 225 种主题切换的背景保留回归通过；真实产品 Nord / Paper 的背景和星点截图已核对；其余主题有自动回放覆盖，仍需原生视觉抽查 |
 | SHELL-MENU | 多个 WSL 发行版把资源管理器右键菜单铺满 | 保留一个普通“在 Pebrel 中打开”；其余发行版集中到一个级联菜单；零/一/多个发行版、重复安装、移除发行版、卸载与旧项迁移 | 文件夹对象/文件夹空白处；中文/空格/盘根路径；点击普通项与每个子项验证 Shell 和 cwd；保留第三方/其他安装拥有的键 | 已实现；真实 Inno 夹具累计 117 项通过，完整安装器编译通过；正式 Explorer 点击验收仍需进行 |
+| KEYMAP-F2 | 默认 F2 重命名标签与 Codex CLI 按键冲突 | 设置中的“重命名标签”可改绑、清除、恢复；旧键释放给终端，新键只重命名当前标签；持久化后仍有效，菜单提示与真实绑定一致；已有其他显式绑定保留 | 侧栏/顶部标签、中文/英文界面；打开重命名后取消；更改后立即使用与重启恢复；真实 Codex CLI 确认可收到 F2 | 12 项模型/GPUI 自动回归通过，覆盖真实设置行与 VT、Win32、disambiguate、report-all 输入模式；旧 shell 编译通过；完整原生 CLI 会话待验收 |
+| SSH-LABEL | [PR #274](https://github.com/Kuddev/pebrel/pull/274)：Shell 选择器未展示 SSH 设置中的主机名称 | 名称与原始目标分列显示；名称/目标均可搜索；空名称回退为目标与 SSH；连接动作与图标仍使用原始目标，排序/隐藏/置顶语义不变 | 三个入口、中文与长名称、窄窗口；选择命名主机仍进入原目标；不把名称当作主机地址 | 行模型回归已覆盖名称、目标、搜索与启动动作；原 PR 原生矩阵通过；原生视觉与真实 SSH 连接待验收 |
 
 ## 修复与评审入口
 
@@ -44,12 +46,15 @@ Windows 右键菜单反馈。它是验收合同，不表示下列功能已经全
 - 下划线与路径边界：[PR #262](https://github.com/Kuddev/pebrel/pull/262)。
 - Windows / WSL 真彩色能力：[PR #263](https://github.com/Kuddev/pebrel/pull/263)，关联 #136。
 - WSL 级联菜单：[PR #264](https://github.com/Kuddev/pebrel/pull/264)。
+- 可配置标签重命名：[PR #272](https://github.com/Kuddev/pebrel/pull/272)。
+- SSH 主机名称：[PR #274](https://github.com/Kuddev/pebrel/pull/274)。
 
 本地组合回归与各 PR 的 CI、Code Owner 评审是不同证据；未合并、未发布不能写成已经交付。
 
 ## 当前测试入口
 
 ```powershell
+cargo test --locked -p nebula --bin pebrel --features gpui-shell rename
 cargo test --locked -p nebula_hook
 cargo test --locked -p nebula --bin pebrel --features gpui-shell platform::environment::tests
 cargo test --locked -p nebula --bin pebrel --features gpui-shell ai_hook::

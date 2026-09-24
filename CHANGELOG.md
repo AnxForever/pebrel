@@ -4,6 +4,85 @@ Every release entry is provided in English and Simplified Chinese.
 
 每个版本条目均同时提供英文和简体中文说明。
 
+## 1.9.1 - Unreleased / 未发布
+
+Unreleased. Prepared for the changes in PRs #257, #260–#265, #272 and #274; integration and release validation are still pending.
+
+未发布。本文对应 PR #257、#260–#265、#272、#274 中的改动，尚待完成合并与发布验证。
+
+### English
+
+#### Added
+
+- Added SSH display names to the Shell picker, Quick Jump and command palette. Named hosts show their configured name alongside the original connection target; unnamed hosts keep the previous display. Search matches both the name and target, and selecting a row still connects to the original destination.
+- Added a configurable tab-rename shortcut in Settings → Key Bindings → Tabs. The default remains F2; changing or clearing the shortcut lets F2 reach terminal applications such as Codex CLI. Changes apply without restarting, and menu shortcut hints follow the effective binding.
+
+#### Fixed
+
+- Fixed Windows Codex Hook commands failing during PowerShell parsing, including executable paths with spaces or special characters. Existing Pebrel-managed commands are migrated while preserving user and third-party hooks. Addresses [#254](https://github.com/Kuddev/pebrel/issues/254) and [#255](https://github.com/Kuddev/pebrel/issues/255).
+- Bounded Hook event forwarding when input remains open or the receiving application stops reading, so forwarding cannot wait indefinitely and keep the helper executable locked. Already running helpers from older versions do not acquire this timeout.
+- Fixed successful same-version repair installations being reported as failures when the main executable remains byte-identical. Before setup starts, the updater briefly waits for installed Hook files to become writable; a persistent lock stops the update before setup can partially replace the installation. Installer success, package verification and the expected application version remain required. Addresses [#258](https://github.com/Kuddev/pebrel/issues/258).
+- Fixed dashed link underlines covering only part of Chinese and other wide characters, and restarting their pattern at spaces or font boundaries. Underlines now follow terminal columns and display scaling.
+- Fixed quoted Windows, UNC and home-directory paths containing spaces being recognized only up to the first space. Link highlighting and opening use the complete quoted path.
+- Fixed WSL shell-prompt links including the trailing `$` or `#`, and absolute prompt paths losing their underline. Opening an absolute WSL prompt path uses the originating distribution; copying keeps the original path text.
+- Fixed missing truecolor declarations in fresh Windows and WSL panes. Applications can retain their intended message-background colors across terminal themes, including Codex user-message backgrounds. Animation output remains controlled by the CLI; Pebrel does not add or filter stars according to reasoning level.
+- Fixed tab context menus mixing hardcoded Chinese with the selected interface language. Menu labels now follow the active language across all 11 supported locales, including Korean, in both sidebar and top tabs.
+
+#### Improved
+
+- Organized Windows Explorer integration into one normal Pebrel open command and one WSL submenu containing the installed distributions. Installation migrates Pebrel-owned flat entries while preserving unrelated or user-edited commands.
+- Expanded issue forms with operating-system, shell, pane-program and connection details, and clearer reproduction and evidence fields to make problem reports easier to investigate.
+
+Windows x64 provides an installer and portable ZIP; Windows ARM64 provides a native portable ZIP. The installer and automatic installation remain x64-only. Linux x64 packages and macOS Apple Silicon / Intel DMGs remain Preview releases.
+
+### 中文
+
+#### 新增
+
+- 在 Shell 选择器、快速跳转和命令面板中显示 SSH 主机名称：已命名的主机显示名称与原始连接目标，未命名的主机保持原来的显示。搜索同时匹配名称和目标，选择后仍连接原始地址。
+- 在“设置 → 按键映射 → 标签页”中新增可修改的“重命名标签”快捷键，默认仍为 F2。修改或清除后，F2 可传递给 Codex CLI 等终端程序；设置无需重启即可生效，菜单提示同步显示实际快捷键。
+
+#### 修复
+
+- 修复 Windows Codex Hook 命令在 PowerShell 解析阶段失败的问题，正确处理程序路径中的空格和特殊字符；迁移 Pebrel 管理的旧命令，同时保留用户及第三方 Hook。对应 [#254](https://github.com/Kuddev/pebrel/issues/254)、[#255](https://github.com/Kuddev/pebrel/issues/255)。
+- 为 Hook 事件转发增加等待期限，避免输入一直未关闭或接收端停止读取时无限等待并持续占用辅助程序文件。已经运行的旧版本 Hook 不会自动获得此超时机制。
+- 修复同版本修复安装成功后，仅因主程序字节未改变而误报失败的问题。启动安装器前，会短暂等待已安装的 Hook 文件恢复可写；持续占用时提前停止，避免安装器只替换部分文件。仍要求安装器成功、安装包校验通过且最终应用版本正确。对应 [#258](https://github.com/Kuddev/pebrel/issues/258)。
+- 修复中文及其他宽字符的链接虚线只覆盖半个字符，以及虚线在空格或字体边界处重新起算的问题；下划线按终端列和显示缩放连续绘制。
+- 修复带引号的 Windows、UNC 和主目录路径包含空格时，只识别到第一个空格的问题；链接高亮与打开操作使用完整的引号内路径。
+- 修复 WSL 提示符路径把末尾 `$`、`#` 包含进链接，以及绝对路径提示符缺少下划线的问题；打开 WSL 绝对提示符路径时使用所属发行版，复制时保留原始路径文本。
+- 修复新建 Windows 和 WSL 面板缺少真彩色声明的问题，使应用能在不同终端主题下保留其指定的消息背景色，包括 Codex 用户消息背景。动画仍由 CLI 决定，Pebrel 不根据思考等级添加或过滤星点。
+- 修复标签右键菜单在非中文界面中混用硬编码中文的问题；侧栏和顶部标签的菜单均跟随当前界面语言，覆盖包括韩语在内的全部 11 种支持语言。
+
+#### 改进
+
+- 整理 Windows 资源管理器右键菜单，保留一个普通 Pebrel 打开入口，并将已安装的 WSL 发行版集中到一个子菜单中；安装时迁移 Pebrel 自有的旧平铺入口，保留无关或经过用户编辑的命令。
+- 完善问题反馈表单，补充操作系统、Shell、面板程序和连接方式等信息，并明确复现步骤与日志、截图要求，便于定位问题。
+
+Windows x64 提供安装器和 ZIP 便携包，Windows ARM64 提供原生便携 ZIP；安装器和应用内自动安装仍仅支持 x64。Linux x64 包及 macOS Apple Silicon／Intel DMG 继续标记为 Preview。
+
+### Contributors
+
+<a href="https://github.com/ZiChuanLan"><img src="https://github.com/ZiChuanLan.png?size=96" width="64" height="64" alt="@ZiChuanLan avatar"></a><a href="https://github.com/YinBuLiao"><img src="https://github.com/YinBuLiao.png?size=96" width="64" height="64" alt="@YinBuLiao avatar"></a><a href="https://github.com/Kuddev"><img src="https://github.com/Kuddev.png?size=96" width="64" height="64" alt="@Kuddev avatar"></a>
+
+- **[@ZiChuanLan](https://github.com/ZiChuanLan)** — SSH host names in the Shell picker, Quick Jump and command palette. / Shell 选择器、快速跳转及命令面板中的 SSH 主机名称。([#274](https://github.com/Kuddev/pebrel/pull/274))
+- **[@YinBuLiao](https://github.com/YinBuLiao)** — Tab context-menu localization across all supported languages, including Korean. / 标签右键菜单的完整多语言支持，包括韩语。([#265](https://github.com/Kuddev/pebrel/pull/265))
+- **[@Kuddev](https://github.com/Kuddev)** — Hook execution and lifetime, repair installation, terminal links and colors, Explorer integration, configurable tab renaming and issue reporting. / Hook 执行与生命周期、修复安装、终端链接和颜色、资源管理器集成、可配置的标签重命名及问题反馈。([#257](https://github.com/Kuddev/pebrel/pull/257), [#260](https://github.com/Kuddev/pebrel/pull/260), [#261](https://github.com/Kuddev/pebrel/pull/261), [#262](https://github.com/Kuddev/pebrel/pull/262), [#263](https://github.com/Kuddev/pebrel/pull/263), [#264](https://github.com/Kuddev/pebrel/pull/264), [#272](https://github.com/Kuddev/pebrel/pull/272))
+
+---
+
+**SHA256**
+
+Checksums will be filled from the final release artifacts. / 校验值将在最终发布产物生成后填写。
+
+- `Pebrel-v1.9.1-linux-x64-preview.AppImage`: `PENDING FINAL BUILD`
+- `Pebrel-v1.9.1-linux-x64-preview.deb`: `PENDING FINAL BUILD`
+- `Pebrel-v1.9.1-linux-x64-preview.tar.gz`: `PENDING FINAL BUILD`
+- `Pebrel-v1.9.1-macos-arm64-preview.dmg`: `PENDING FINAL BUILD`
+- `Pebrel-v1.9.1-macos-x64-preview.dmg`: `PENDING FINAL BUILD`
+- `Pebrel-v1.9.1-windows-x64.zip`: `PENDING FINAL BUILD`
+- `Pebrel-v1.9.1-windows-x64-setup.exe`: `PENDING FINAL BUILD`
+- `Pebrel-v1.9.1-windows-arm64.zip`: `PENDING FINAL BUILD`
+
 ## 1.9.0 - 2026-09-22
 
 ### English
