@@ -197,6 +197,15 @@ fn native_ssh_copy_context_menu_preview() {
 
                 let _ = cx.update_window(handle.into(), |_, window, cx| {
                     pane.update(cx, |pane, cx| pane.close_ssh_editor(window, cx));
+                    let _ = window.draw(cx);
+                    window.dispatch_event(
+                        gpui::PlatformInput::MouseMove(gpui::MouseMoveEvent {
+                            position: point(px(300.0), px(220.0)),
+                            pressed_button: None,
+                            modifiers: gpui::Modifiers::default(),
+                        }),
+                        cx,
+                    );
                     window.dispatch_event(
                         gpui::PlatformInput::MouseDown(gpui::MouseDownEvent {
                             position: point(px(300.0), px(220.0)),
