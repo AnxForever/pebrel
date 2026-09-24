@@ -20,6 +20,60 @@ def run_git(repository: Path, *args: str) -> None:
 
 
 class ProhibitedNamesTests(unittest.TestCase):
+    def check_staged(self, repository: Path):
+        return subprocess.run(
+            [sys.executable, str(CHECKER), "staged"], cwd=repository,
+            text=True, encoding="utf-8", capture_output=True,
+            env={**os.environ, "PYTHONUTF8": "1"},
+        )
+
+    @unittest.skipIf(os.name == "nt", "Windows filenames cannot contain raw invalid UTF-8 bytes")
+    def test_invalid_utf8_path_cannot_turn_into_an_empty_diff(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            run_git(repository, "init", "-q")
+            with open(os.fsencode(repository) + b"/bad-\xff.rs", "wb") as output:
+                output.write(b"Ghostty\n")
+            run_git(repository, "add", "--all")
+            result = self.check_staged(repository)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("utf-8", result.stderr.lower())
+
+    def test_invalid_utf8_text_and_message_are_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            run_git(repository, "init", "-q")
+            path = repository / "source.rs"
+            path.write_bytes(b"safe \xff\n")
+            run_git(repository, "add", "source.rs")
+            staged = self.check_staged(repository)
+            message = subprocess.run(
+                [sys.executable, str(CHECKER), "message", str(path)], cwd=repository,
+                text=True, encoding="utf-8", capture_output=True,
+                env={**os.environ, "PYTHONUTF8": "1"},
+            )
+            for result in (staged, message):
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("utf-8", result.stderr.lower())
+
+    def test_valid_unicode_and_control_character_paths_are_scanned(self) -> None:
+        names = ["路径.rs"]
+        if os.name != "nt":
+            names.append("control\tline\n.rs")
+        for name in names:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                repository = Path(directory)
+                run_git(repository, "init", "-q")
+                path = repository / name
+                path.write_text("safe\n", encoding="utf-8")
+                run_git(repository, "add", "--", name)
+                self.assertEqual(self.check_staged(repository).returncode, 0)
+                path.write_text("Ghostty\n", encoding="utf-8")
+                run_git(repository, "add", "--", name)
+                result = self.check_staged(repository)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("Ghostty", result.stderr)
+
     def test_names_do_not_match_inside_unrelated_words(self) -> None:
         self.assertFalse(check_prohibited_names.prohibited("spotty network; tty72; netcatty_adapter"))
         self.assertTrue(check_prohibited_names.prohibited("Use Otty or TTY-7"))

@@ -60,7 +60,11 @@ jobs:
             scripts.tests.test_ci_plan \
             scripts.tests.test_ci_native_tests \
             scripts.tests.test_stable_release \
-            scripts.tests.test_ci_cache -v
+            scripts.tests.test_ci_cache \
+            scripts.tests.test_platform_cfg \
+            scripts.tests.test_pr_size_workflow -v
+      - name: Check platform cfg budget before native jobs
+        run: python3 scripts/check_platform_cfg.py
       - name: Plan native validation
         id: matrix
         shell: bash

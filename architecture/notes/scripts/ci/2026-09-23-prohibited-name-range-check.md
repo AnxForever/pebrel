@@ -17,7 +17,7 @@ The repository already used an ignored `scripts/check_prohibited_names.py` in st
 ## Decision
 
 - Publish the existing checker as the single policy implementation and add a fail-closed range mode.
-- Resolve both revisions, compute their `merge-base`, scan ordinary commits against their first parent and merge commits with a combined diff, and scan every commit message in the resulting range. Missing, zero, unreadable, or unrelated revisions return failure.
+- Resolve both revisions, compute their `merge-base`, scan ordinary commits against their first parent and merge commits with a combined diff, and scan every commit message in the resulting range. Missing, zero, unreadable, or unrelated revisions return failure. Invalid UTF-8 in paths, patches or messages fails explicitly rather than substituting another path or text.
 - Keep only the checker, its contract tests and the intentional negative comparison fixture as exact path exceptions. Strip only reviewed inline attribution, Cargo git/source references, and protocol compatibility identifiers before applying the existing patterns.
 - Run the checker as a step inside `architecture-contracts` and run its unit tests with the other guardrail tests. No new required check or server-side ruleset change is introduced.
 
@@ -34,7 +34,7 @@ New PR/merge-group/main-push text and commit subjects are checked by the existin
 
 ## Validation
 
-`scripts/tests/test_prohibited_names.py` covers ordinary comparison failure, inline attribution positive/negative paths, protocol identifiers, Cargo dependency references, GitHub CLI text, range text, range commit messages, diverged related bases, unrelated/missing bases, old-history exclusion, added-then-deleted text, and merge-resolution additions. The checker also passes `py_compile` before CI execution.
+`scripts/tests/test_prohibited_names.py` covers ordinary comparison failure, inline attribution positive/negative paths, protocol identifiers, Cargo dependency references, GitHub CLI text, range text, range commit messages, diverged related bases, unrelated/missing bases, old-history exclusion, added-then-deleted text, and merge-resolution additions. The checker also covers malformed UTF-8 paths/text and normal Unicode/control-character paths; the raw-byte path fixture runs on POSIX, where that filename can exist.
 
 ## Supersedes
 

@@ -100,7 +100,7 @@ PROTOCOL_COMPATIBILITY_PATTERNS = (
 
 
 def git(*args: str) -> bytes:
-    return subprocess.check_output(["git", *args], stderr=subprocess.DEVNULL)
+    return subprocess.check_output(["git", "-c", "i18n.logOutputEncoding=utf-8", *args], stderr=subprocess.DEVNULL)
 
 
 def prohibited(text: str) -> bool:
@@ -126,12 +126,12 @@ def prohibited_source_line(path: str, text: str) -> bool:
 
 def changed_paths(*revision_args: str) -> list[str]:
     raw = git("diff", *revision_args, "--name-only", "-z", "--diff-filter=ACMR", "--", ".")
-    return [path.decode("utf-8", "replace") for path in raw.split(b"\0") if path]
+    return [path.decode("utf-8") for path in raw.split(b"\0") if path]
 
 
 def added_lines(path: str, *revision_args: str) -> Iterable[tuple[int, str]]:
     patch = git("diff", *revision_args, "--no-ext-diff", "--unified=0", "--", path)
-    for line_no, raw_line in enumerate(patch.decode("utf-8", "replace").splitlines(), 1):
+    for line_no, raw_line in enumerate(patch.decode("utf-8").splitlines(), 1):
         if raw_line.startswith("+") and not raw_line.startswith("+++"):
             yield line_no, raw_line[1:]
 
@@ -149,7 +149,7 @@ def scan_added_lines(*revision_args: str) -> list[str]:
 
 
 def added_patch_lines(patch: bytes, merge_parent_count: int | None) -> Iterable[tuple[int, str]]:
-    lines = patch.decode("utf-8", "replace").splitlines()
+    lines = patch.decode("utf-8").splitlines()
     if merge_parent_count is None:
         for line_no, raw_line in enumerate(lines, 1):
             if raw_line.startswith("+") and not raw_line.startswith("+++"):
@@ -169,7 +169,7 @@ def added_patch_lines(patch: bytes, merge_parent_count: int | None) -> Iterable[
 
 def scan_pending_commits(revision_range: str) -> list[str]:
     hits: list[str] = []
-    commits = git("rev-list", "--reverse", revision_range).decode("ascii", "replace").splitlines()
+    commits = git("rev-list", "--reverse", revision_range).decode("ascii").splitlines()
     for commit in commits:
         parents = git("rev-list", "--parents", "-n", "1", commit).decode("ascii").split()
         parent = parents[1] if len(parents) > 1 else None
@@ -188,7 +188,7 @@ def scan_pending_commits(revision_range: str) -> list[str]:
         for raw_path in paths.split(b"\0"):
             if not raw_path:
                 continue
-            path = raw_path.decode("utf-8", "replace")
+            path = raw_path.decode("utf-8")
             normalized = path.replace("\\", "/")
             if normalized in EXEMPT_PATHS:
                 continue
@@ -209,7 +209,7 @@ def scan_pending_commits(revision_range: str) -> list[str]:
 def scan_message(path: Path) -> list[str]:
     return [
         f"{line_no}:{line}"
-        for line_no, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1)
+        for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
         if prohibited(line)
     ]
 
@@ -239,7 +239,7 @@ def scan_commit_messages(revision_range: str) -> list[str]:
     hits: list[str] = []
     commits = git("rev-list", "--reverse", revision_range).decode("ascii").splitlines()
     for commit in commits:
-        message = git("show", "-s", "--format=%B", commit).decode("utf-8", "replace")
+        message = git("show", "-s", "--format=%B", commit).decode("utf-8")
         for line_no, line in enumerate(message.splitlines(), 1):
             if prohibited(line):
                 hits.append(f"commit-message:{commit}:{line_no}:{line}")
@@ -263,7 +263,7 @@ def pending_push_range() -> str | None:
         stderr=subprocess.DEVNULL,
         check=False,
     )
-    upstream = result.stdout.decode("utf-8", "replace").strip()
+    upstream = result.stdout.decode("utf-8").strip()
     return f"{upstream}..HEAD" if result.returncode == 0 and upstream else None
 
 
@@ -296,7 +296,7 @@ def main(argv: list[str]) -> int:
         if revision_range is None:
             print("No upstream branch; skipping pending-push name check")
             return 0
-        message_text = git("log", "--format=%H:%s%n%b", revision_range).decode("utf-8", "replace")
+        message_text = git("log", "--format=%H:%s%n%b", revision_range).decode("utf-8")
         hits = [
             f"commit-message:{line_no}:{line}"
             for line_no, line in enumerate(message_text.splitlines(), 1)
@@ -321,4 +321,8 @@ def main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main(sys.argv))
+    try:
+        raise SystemExit(main(sys.argv))
+    except (OSError, UnicodeError, subprocess.CalledProcessError) as exc:
+        print(f"ERROR: cannot read naming-check input: {exc}", file=sys.stderr)
+        raise SystemExit(1)
