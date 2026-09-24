@@ -73,6 +73,7 @@
     "delete": "Eliminar",
     "edit": "Editar",
     "rename": "Cambiar nombre",
+    "rename_tab": "Renombrar pestaña",
     "copy": "Copiar",
     "paste": "Pegar",
     "cut": "Cortar",
