@@ -2,6 +2,8 @@ name: SSH copy screenshots
 
 on:
   workflow_dispatch:
+  push:
+    branches: ["feat/ssh-host-duplicate-menu"]
   pull_request:
     types: [opened, synchronize, reopened]
     paths:
