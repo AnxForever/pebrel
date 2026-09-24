@@ -237,6 +237,7 @@
     "delete": "Delete",
     "edit": "Edit",
     "rename": "Rename",
+    "rename_tab": "Rename tab",
     "copy": "Copy",
     "paste": "Paste",
     "cut": "Cut",
