@@ -855,9 +855,7 @@ impl NebulaWorkspace {
             return Some(format!("{error}（点右上角重新读取）"));
         }
         if self.remote_browser.preflighting {
-            return Some(
-                language.text(crate::i18n::Message::TransferChecking).to_owned(),
-            );
+            return Some(language.text(crate::i18n::Message::TransferChecking).to_owned());
         }
         if let Some(snapshot) = self.remote_transfer_snapshot()
             && snapshot.phase == SftpPhase::Working
