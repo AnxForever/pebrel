@@ -161,11 +161,11 @@ jobs:
           $env:PEBREL_SSH_COPY_QA_DIR = $probe
           $stdout = Join-Path $probe 'probe.stdout.log'
           $stderr = Join-Path $probe 'probe.stderr.log'
-          $args = @('test', '--locked', '-p', 'nebula', '--bin', 'pebrel', '--features', 'gpui-test-support', 'native_ssh_copy_context_menu_preview', '--', '--ignored', '--nocapture')
+          $args = @('test', '--release', '--locked', '-p', 'nebula', '--bin', 'pebrel', '--features', 'gpui-test-support', 'native_ssh_copy_context_menu_preview', '--', '--ignored', '--nocapture')
           $cargo = Start-Process cargo -ArgumentList $args -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
 
           $ready = Join-Path $probe 'menu-ready.json'
-          $deadline = (Get-Date).AddMinutes(20)
+          $deadline = (Get-Date).AddMinutes(30)
           while (-not (Test-Path $ready)) {
             if ($cargo.HasExited) {
               Get-Content $stdout -ErrorAction SilentlyContinue
