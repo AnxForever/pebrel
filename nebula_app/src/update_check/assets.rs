@@ -101,8 +101,25 @@ mod tests {
     }
     #[test]
     fn windows_architectures_are_exact() {
-        assert_eq!(windows_names("1.9.1", "aarch64"), ["Pebrel-v1.9.1-windows-arm64-setup.exe"]);
-        assert!(windows_names("1.9.1", "unknown").is_empty());
+        let version = "1.9.2";
+        let arm = windows_names(version, "aarch64");
+        let x64 = windows_names(version, "x86_64");
+        assert_eq!(arm, ["Pebrel-v1.9.2-windows-arm64-setup.exe"]);
+        assert_eq!(x64, super::super::windows_x64_installer_names(version));
+        assert!(windows_names(version, "unknown").is_empty());
+        let assets = [x64[0].clone(), arm[0].clone(), "Pebrel-v1.9.2-windows-arm64.zip".into()]
+            .into_iter()
+            .map(|name| GitHubReleaseAsset {
+                name,
+                browser_download_url: "https://example.invalid".into(),
+                size: 42,
+                digest: Some(format!("sha256:{}", "a".repeat(64))),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(select(version, "", &assets, &arm).unwrap().name, arm[0]);
+        assert_eq!(select(version, "", &assets, &x64).unwrap().name, x64[0]);
+        assert!(select(version, "", &assets[..1], &arm).is_none());
+        assert!(select(version, "", &assets[2..], &arm).is_none());
     }
     #[test]
     fn checksum_manifest_requires_one_exact_valid_entry() {
