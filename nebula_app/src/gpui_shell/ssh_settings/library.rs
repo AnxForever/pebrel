@@ -129,14 +129,16 @@ impl SettingsPane {
             .label
             .filter(|label| !label.trim().is_empty())
             .unwrap_or_else(|| host.clone());
-        let label = self.ssh_hosts.profiles.next_default_label(label.trim());
+        let copy_label = self.ssh_hosts.profiles.next_default_label(label.trim());
 
-        self.open_ssh_editor(Some(host), window, cx);
+        self.open_ssh_editor(Some(host.clone()), window, cx);
         if let Some(editor) = self.ssh_editor.as_mut() {
             editor.original_destination = None;
+            // 复制不会重命名原主机，编辑路径排除的原地址仍应可用作新主机的跳板。
+            editor.jump_choices.push((host, label));
         }
         self.ssh_destination_input.update(cx, |input, cx| input.set_value("", window, cx));
-        self.ssh_label_input.update(cx, |input, cx| input.set_value(label, window, cx));
+        self.ssh_label_input.update(cx, |input, cx| input.set_value(copy_label, window, cx));
         self.ssh_password_input.update(cx, |input, cx| {
             input.set_placeholder(
                 crate::gpui_shell::config::ui_language(cx)
