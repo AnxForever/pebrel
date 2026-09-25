@@ -130,9 +130,16 @@ impl TerminalView {
                 let exec_context = crate::runtime_exec::PaneExecContext::from_pty_options(&options);
                 let spawned = session::spawn(initial, term_config, options);
                 if spawned.is_ok()
-                    && let Some(cwd) = history_cwd.as_deref().and_then(|path| path.to_str())
+                    && let Some(cwd) = history_cwd
                 {
-                    crate::directory_history::global().record(cwd);
+                    // 目录校验和原子落盘不能拖慢开窗；已成功启动的访问记录也不随 pane 关闭取消。
+                    cx.background_executor()
+                        .spawn(async move {
+                            if let Some(cwd) = cwd.to_str() {
+                                crate::directory_history::global().record(cwd);
+                            }
+                        })
+                        .detach();
                 }
                 (
                     None,
@@ -370,6 +377,18 @@ mod tests {
                 &crate::display::SuggestEnv::Wsl { distro: "Debian".into() }
             ),
             None
+        );
+        assert_eq!(
+            startup_history_directory(
+                &options,
+                &crate::display::SuggestEnv::Ssh { destination: "example".into() }
+            ),
+            None
+        );
+        options.working_directory = None;
+        assert_eq!(
+            startup_history_directory(&options, &crate::display::SuggestEnv::Local),
+            Some(std::path::absolute(std::env::current_dir().unwrap()).unwrap())
         );
     }
 }
